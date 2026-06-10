@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: OpenReshoot README
+    url: https://github.com/kellyvv/OpenReshoot#readme
+    about: Start here for setup and model notes.

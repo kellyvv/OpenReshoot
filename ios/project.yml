@@ -1,0 +1,50 @@
+name: OpenReshoot
+options:
+  bundleIdPrefix: com.openreshoot
+  deploymentTarget:
+    iOS: "18.0"          # MetalSplatter requires iOS 18+
+  createIntermediateGroups: true
+
+packages:
+  MetalSplatter:
+    url: https://github.com/scier/MetalSplatter
+    from: "1.0.1"
+
+schemes:
+  OpenReshoot:
+    build:
+      targets:
+        OpenReshoot: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+
+targets:
+  OpenReshoot:
+    type: application
+    platform: iOS
+    sources:
+      - path: OpenReshoot
+    info:
+      path: OpenReshoot/Info.plist
+      properties:
+        NSPhotoLibraryUsageDescription: "Pick a photo to turn into a 3D parallax view."
+        NSPhotoLibraryAddUsageDescription: "Save the reconstructed photo to your library."
+        UILaunchScreen: {}
+        UIRequiresFullScreen: true
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+    dependencies:
+      - package: MetalSplatter
+        product: MetalSplatter
+      - package: MetalSplatter
+        product: SplatIO
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.openreshoot.app
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        # 1536x1536 activations are heavy — ask iOS for the raised memory cap.
+        # (Requires a provisioning profile that allows the entitlement.)
+        CODE_SIGN_ENTITLEMENTS: OpenReshoot/OpenReshoot.entitlements

@@ -1,0 +1,27 @@
+name: Build help
+description: Ask for help with setup, model conversion, or Xcode builds.
+title: "[Build] "
+labels: ["build"]
+body:
+  - type: textarea
+    id: command
+    attributes:
+      label: Command that failed
+      placeholder: "scripts/prepare_ios_model.sh"
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: Paste the relevant terminal or Xcode output.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: checklist
+    attributes:
+      label: Setup checklist
+      description: Paste the output from `scripts/check_openreshoot_setup.sh`.
+    validations:
+      required: false

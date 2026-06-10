@@ -1,0 +1,7 @@
+# Local web prototype dependencies.
+#
+# Install from the repository root:
+#   pip install -r requirements-web.txt
+
+-r requirements.txt
+google-genai
