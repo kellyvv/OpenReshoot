@@ -1569,6 +1569,7 @@ struct SettingsView: View {
     @ObservedObject private var modelStore: ReconstructionModelStore
     @Environment(\.dismiss) private var dismiss
     @State private var geminiKey: String
+    private static let geminiAPIKeyURL = URL(string: "https://aistudio.google.com/app/apikey")!
 
     init(app: AppState) {
         self.app = app
@@ -1655,6 +1656,14 @@ struct SettingsView: View {
                     SecureField("Gemini API Key", text: $geminiKey)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+
+                    Link(destination: Self.geminiAPIKeyURL) {
+                        Label("打开 Google AI Studio", systemImage: "key")
+                    }
+
+                    Text("获取方法：登录 Google AI Studio，点击 Create API key，复制后粘贴到上方。请勿公开分享 API Key。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 } header: {
                     Text("Gemini 重构")
                 }
