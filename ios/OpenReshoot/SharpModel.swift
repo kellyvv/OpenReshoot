@@ -15,21 +15,26 @@ struct SharpOutput {
     var count: Int { mean.shape[1].intValue }
 }
 
-/// Loads the bundled reconstruction model and runs the network.
+/// Loads the reconstruction model and runs the network.
 final class SharpModel {
     static let internalRes = 1536
     private let model: MLModel
 
-    init() throws {
-        guard let url = Bundle.main.url(forResource: "SHARP", withExtension: "mlmodelc") else {
+    init(modelURL: URL? = nil) throws {
+        let resolvedURL: URL
+        if let modelURL {
+            resolvedURL = modelURL
+        } else if let bundledURL = Bundle.main.url(forResource: "SHARP", withExtension: "mlmodelc") {
+            resolvedURL = bundledURL
+        } else {
             throw err("Reconstruction model not in bundle — add SHARP.mlpackage to the OpenReshoot target.")
         }
         let cfg = MLModelConfiguration()
         // .all makes Core ML try to place this 700M/1536² model on the Neural Engine,
         // whose compile/partition step hangs for a model this large. GPU is plenty.
         cfg.computeUnits = .cpuAndGPU
-        print("⏳ [OpenReshoot] MLModel(contentsOf:) compiling for GPU…")
-        model = try MLModel(contentsOf: url, configuration: cfg)
+        print("⏳ [OpenReshoot] MLModel(contentsOf:) loading \(resolvedURL.lastPathComponent)…")
+        model = try MLModel(contentsOf: resolvedURL, configuration: cfg)
         print("✅ [OpenReshoot] MLModel ready")
     }
 

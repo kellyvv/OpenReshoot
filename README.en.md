@@ -1,6 +1,8 @@
 <div align="center">
   <img src="data/teaser.jpg" alt="OpenReshoot preview" width="760">
 
+  <video src="https://github.com/user-attachments/assets/57ccefa4-ae91-4185-ba59-5f2f672e9c61" width="760" controls muted playsinline></video>
+
   <h1>OpenReshoot</h1>
 
   <p><strong>Reshoot an ordinary photo from a new angle.</strong></p>
@@ -23,6 +25,7 @@
     <a href="#core-experience">Core Experience</a> ·
     <a href="#latest-status">Latest Status</a> ·
     <a href="#quick-start">Quick Start</a> ·
+    <a href="#model-download">Model Download</a> ·
     <a href="#gemini-api-key">Gemini API Key</a> ·
     <a href="#local-web-prototype">Local Web Prototype</a> ·
     <a href="#license">License</a>
@@ -39,24 +42,24 @@ After WWDC 2026, spatial photos and angle-aware photo viewing became one of the 
 - Make still photos move: the photo changes perspective without moving the whole viewer.
 - Generate the final image: when the angle feels right, Reshoot creates a clearer, more complete photo.
 - Native iOS flow: system photo picker, native controls, and system photo library saving.
-- Local photo motion: viewing the photo motion does not need an API key or a PC server.
+- Local photo motion: after downloading the model, photo motion runs on device and does not need a Gemini API key or a PC server.
 
 ## Latest Status
 
 2026-06-11
 
 - The iOS flow now matches the PC flow: pick a photo, view motion, reshoot the current angle, and save the result.
+- The iOS app is packaged as a lightweight shell by default and does not bundle the 1GB+ model; first use downloads the Core ML model from Hugging Face in Settings.
 - The viewer includes glow, sheen, cover fade, and colorful missing-area treatment.
 - The bottom controls now use a quieter PhoneClaw-style visual direction and blend directly into the background.
-- The README, setup checker, and model preparation scripts have been cleaned up for new contributors.
+- The model repository is public on [Hugging Face](https://huggingface.co/kellyxiaowei/openreshoot-sharp-coreml), where the `SHARP.mlpackage` source files can be inspected directly.
 
 ## Quick Start
 
 Requirements:
 
-- macOS with Xcode 15 or newer.
+- macOS with Xcode 16 or newer.
 - XcodeGen: `brew install xcodegen`
-- Python dependencies: `pip install -r requirements-ios.txt`
 - A real iPhone or iPad on iOS 18 or newer.
 
 Prepare the project:
@@ -64,16 +67,35 @@ Prepare the project:
 ```bash
 git clone https://github.com/kellyvv/OpenReshoot.git
 cd OpenReshoot
-scripts/check_openreshoot_setup.sh
-scripts/prepare_ios_model.sh
 cd ios
 xcodegen generate
 open OpenReshoot.xcodeproj
 ```
 
-In Xcode, select the `OpenReshoot` target, set your signing team, choose a real iOS device, and run.
+In Xcode, select the `OpenReshoot` target, set your signing team, choose a real iOS device, and run. The default build does not include `SHARP.mlpackage`, keeping the app bundle lightweight.
 
 More iOS-specific details are in [ios/README.md](ios/README.md).
+
+## Model Download
+
+After first launch, tap the Settings button in the top-right corner, then go to **Settings → Model → Download Model**.
+
+The app downloads and rebuilds the Core ML package from Hugging Face:
+
+```text
+https://huggingface.co/kellyxiaowei/openreshoot-sharp-coreml
+```
+
+Downloaded file layout:
+
+```text
+SHARP.mlpackage/
+  Manifest.json
+  Data/com.apple.CoreML/model.mlmodel
+  Data/com.apple.CoreML/weights/weight.bin
+```
+
+After download, the app compiles the package locally into `SHARP.mlmodelc`. Photo selection and photo motion then run through on-device Core ML inference. The model is based on the Apple SHARP research model; see [LICENSE_MODEL](LICENSE_MODEL) and the Hugging Face model card for model licensing.
 
 ## Gemini API Key
 
@@ -82,11 +104,11 @@ OpenReshoot currently uses `gemini-3.1-flash-image` to generate the final Reshoo
 Setup:
 
 1. Open [Google AI Studio API Keys](https://aistudio.google.com/apikey), sign in, and create a Gemini API key.
-2. In the iOS app, tap the key button in the bottom-right corner.
+2. In the iOS app, tap the Settings button.
 3. Paste the API key and save it.
 4. Return to the photo, drag to the angle you want, then tap Reshoot.
 
-The local photo motion experience does not need an API key. Gemini is only used when the user taps Reshoot. Do not commit your API key to GitHub.
+The local photo motion experience does not need a Gemini API key. Gemini is only used when the user taps Reshoot to generate the final image. Do not commit your API key to GitHub.
 
 ## Local Web Prototype
 

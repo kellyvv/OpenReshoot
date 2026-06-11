@@ -22,6 +22,8 @@
 	<string>Pick a photo to turn into a 3D parallax view.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Save the reconstructed photo to your library.</string>
+	<key>OpenReshootModelDownloadBaseURL</key>
+	<string>https://huggingface.co/kellyxiaowei/openreshoot-sharp-coreml/resolve/main/SHARP.mlpackage</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

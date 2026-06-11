@@ -1,7 +1,9 @@
 import SwiftUI
+import Foundation
 import Photos
 import PhotosUI
 import MetalKit
+import CoreML
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import ImageIO
@@ -69,6 +71,361 @@ enum SaveState {
     case failed
 }
 
+enum ReconstructionModelInstallState: Equatable, Sendable {
+    case notInstalled
+    case checkingSource
+    case downloading
+    case downloaded
+    case bundled
+    case failed(String)
+}
+
+struct ReconstructionDownloadProgress: Equatable, Sendable {
+    var bytesReceived: Int64 = 0
+    var totalBytes: Int64?
+    var bytesPerSecond: Double?
+
+    var fractionCompleted: Double? {
+        guard let totalBytes, totalBytes > 0 else { return nil }
+        return min(1, max(0, Double(bytesReceived) / Double(totalBytes)))
+    }
+}
+
+private enum ReconstructionModelDownloadError: LocalizedError {
+    case invalidURL
+    case invalidResponse
+    case httpStatus(Int)
+    case unsupportedFormat(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidURL:
+            return "模型下载 URL 无效"
+        case .invalidResponse:
+            return "下载源响应无效"
+        case .httpStatus(let code):
+            return "模型下载失败，HTTP \(code)"
+        case .unsupportedFormat(let format):
+            return "当前下载器只支持 Hugging Face 上的未压缩 .mlpackage 源文件，当前格式是 \(format)。"
+        }
+    }
+}
+
+/// PhoneClaw-style model installer state, scoped to OpenReshoot's single Core ML asset.
+final class ReconstructionModelStore: ObservableObject {
+    @Published private(set) var installState: ReconstructionModelInstallState = .notInstalled
+    @Published private(set) var progress = ReconstructionDownloadProgress()
+
+    private var downloadTask: Task<Void, Never>?
+
+    init() {
+        refreshInstallState()
+    }
+
+    var isDownloading: Bool {
+        if case .downloading = installState { return true }
+        if case .checkingSource = installState { return true }
+        return false
+    }
+
+    var activeModelLabel: String {
+        switch installState {
+        case .downloaded:
+            return "已下载"
+        case .bundled:
+            return "内置"
+        case .downloading:
+            return "下载中"
+        case .checkingSource:
+            return "检查中"
+        case .failed:
+            return hasDownloadedModel ? "已下载" : (Self.bundledModelURL == nil ? "未安装" : "内置")
+        case .notInstalled:
+            return "未安装"
+        }
+    }
+
+    var hasDownloadedModel: Bool {
+        FileManager.default.fileExists(atPath: Self.downloadedModelURL.path)
+    }
+
+    func activeModelURL() -> URL? {
+        Self.activeModelURL()
+    }
+
+    func refreshInstallState() {
+        if hasDownloadedModel {
+            installState = .downloaded
+        } else if Self.bundledModelURL != nil {
+            installState = .bundled
+        } else {
+            installState = .notInstalled
+        }
+    }
+
+    func installModel(onInstalled: @escaping () -> Void = {}) {
+        guard !isDownloading else { return }
+
+        installState = .checkingSource
+        progress = ReconstructionDownloadProgress()
+        downloadTask = Task { [weak self] in
+            guard let store = self else { return }
+            do {
+                if Self.builtInDownloadBaseURL != nil {
+                    try await Self.downloadAndInstallPackage { progress in
+                        await store.updateDownloadProgress(progress)
+                    }
+                } else {
+                    try Self.installBundledModel()
+                }
+                await store.finishInstall(onInstalled: onInstalled)
+            } catch is CancellationError {
+                await store.finishCancellation()
+            } catch {
+                await store.finishFailure(error)
+            }
+        }
+    }
+
+    @MainActor
+    private func updateDownloadProgress(_ nextProgress: ReconstructionDownloadProgress) {
+        progress = nextProgress
+        installState = .downloading
+    }
+
+    @MainActor
+    private func finishInstall(onInstalled: () -> Void) {
+        progress = ReconstructionDownloadProgress(
+            bytesReceived: progress.bytesReceived,
+            totalBytes: progress.totalBytes,
+            bytesPerSecond: progress.bytesPerSecond
+        )
+        installState = .downloaded
+        downloadTask = nil
+        onInstalled()
+    }
+
+    @MainActor
+    private func finishCancellation() {
+        downloadTask = nil
+        refreshInstallState()
+    }
+
+    @MainActor
+    private func finishFailure(_ error: Error) {
+        downloadTask = nil
+        installState = .failed(error.localizedDescription)
+    }
+
+    func cancelDownload() {
+        downloadTask?.cancel()
+        downloadTask = nil
+        refreshInstallState()
+    }
+
+    func removeDownloadedModel(onRemoved: @escaping () -> Void = {}) {
+        cancelDownload()
+        do {
+            if FileManager.default.fileExists(atPath: Self.downloadedModelURL.path) {
+                try FileManager.default.removeItem(at: Self.downloadedModelURL)
+            }
+            if FileManager.default.fileExists(atPath: Self.downloadedRawModelURL.path) {
+                try FileManager.default.removeItem(at: Self.downloadedRawModelURL)
+            }
+            onRemoved()
+            refreshInstallState()
+        } catch {
+            installState = .failed(error.localizedDescription)
+        }
+    }
+
+    static func activeModelURL() -> URL? {
+        if FileManager.default.fileExists(atPath: downloadedModelURL.path) {
+            return downloadedModelURL
+        }
+        return bundledModelURL
+    }
+
+    static var bundledModelURL: URL? {
+        Bundle.main.url(forResource: "SHARP", withExtension: "mlmodelc")
+    }
+
+    private static let packageFileSpecs: [(relativePath: String, expectedBytes: Int64)] = [
+        ("Manifest.json", 617),
+        ("Data/com.apple.CoreML/model.mlmodel", 1_019_167),
+        ("Data/com.apple.CoreML/weights/weight.bin", 1_322_157_376),
+    ]
+
+    private static var builtInDownloadBaseURL: URL? {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: "OpenReshootModelDownloadBaseURL") as? String else {
+            return nil
+        }
+        let trimmed = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return trimmed.isEmpty ? nil : URL(string: trimmed + "/")
+    }
+
+    static var downloadedModelURL: URL {
+        modelsDirectory.appendingPathComponent("SHARP.mlmodelc", isDirectory: true)
+    }
+
+    private static var downloadedRawModelURL: URL {
+        modelsDirectory.appendingPathComponent("SHARP-source-model", isDirectory: false)
+    }
+
+    private static var modelsDirectory: URL {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return support
+            .appendingPathComponent("OpenReshoot", isDirectory: true)
+            .appendingPathComponent("Models", isDirectory: true)
+    }
+
+    private static func installBundledModel() throws {
+        guard let bundledModelURL else {
+            throw ReconstructionModelDownloadError.invalidURL
+        }
+        let fileManager = FileManager.default
+        try fileManager.createDirectory(at: modelsDirectory, withIntermediateDirectories: true)
+        let stagingURL = modelsDirectory.appendingPathComponent("SHARP.mlmodelc.installing-\(UUID().uuidString)", isDirectory: true)
+        try? fileManager.removeItem(at: stagingURL)
+        try fileManager.copyItem(at: bundledModelURL, to: stagingURL)
+        try? fileManager.removeItem(at: downloadedModelURL)
+        try fileManager.moveItem(at: stagingURL, to: downloadedModelURL)
+    }
+
+    private static func downloadAndInstallPackage(
+        progress: @escaping (ReconstructionDownloadProgress) async -> Void
+    ) async throws {
+        guard let baseURL = builtInDownloadBaseURL,
+              let scheme = baseURL.scheme?.lowercased(),
+              ["http", "https"].contains(scheme) else {
+            throw ReconstructionModelDownloadError.invalidURL
+        }
+
+        let fileManager = FileManager.default
+        let tempDirectory = fileManager.temporaryDirectory
+            .appendingPathComponent("OpenReshootModel-\(UUID().uuidString)", isDirectory: true)
+        try fileManager.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: tempDirectory) }
+
+        let packageURL = tempDirectory.appendingPathComponent("SHARP.mlpackage", isDirectory: true)
+        try fileManager.createDirectory(at: packageURL, withIntermediateDirectories: true)
+
+        let startedAt = Date()
+        let totalExpectedBytes = packageFileSpecs.reduce(Int64(0)) { $0 + $1.expectedBytes }
+        var completedBytes: Int64 = 0
+
+        for spec in packageFileSpecs {
+            guard let sourceURL = URL(string: spec.relativePath, relativeTo: baseURL)?.absoluteURL else {
+                throw ReconstructionModelDownloadError.invalidURL
+            }
+            let destinationURL = packageURL.appendingPathComponent(spec.relativePath, isDirectory: false)
+            let baseCompletedBytes = completedBytes
+            try await downloadFile(from: sourceURL, to: destinationURL) { fileBytes in
+                let receivedBytes = baseCompletedBytes + fileBytes
+                await progress(ReconstructionDownloadProgress(
+                    bytesReceived: min(receivedBytes, totalExpectedBytes),
+                    totalBytes: totalExpectedBytes,
+                    bytesPerSecond: Double(receivedBytes) / max(Date().timeIntervalSince(startedAt), 0.1)
+                ))
+            }
+            completedBytes += spec.expectedBytes
+            await progress(ReconstructionDownloadProgress(
+                bytesReceived: min(completedBytes, totalExpectedBytes),
+                totalBytes: totalExpectedBytes,
+                bytesPerSecond: Double(completedBytes) / max(Date().timeIntervalSince(startedAt), 0.1)
+            ))
+        }
+
+        let compiledURL = try await MLModel.compileModel(at: packageURL)
+        try fileManager.createDirectory(at: modelsDirectory, withIntermediateDirectories: true)
+
+        let stagingURL = modelsDirectory.appendingPathComponent("SHARP.mlmodelc.installing-\(UUID().uuidString)", isDirectory: true)
+        try? fileManager.removeItem(at: stagingURL)
+        try fileManager.moveItem(at: compiledURL, to: stagingURL)
+        try? fileManager.removeItem(at: downloadedModelURL)
+        try? fileManager.removeItem(at: downloadedRawModelURL)
+        try fileManager.moveItem(at: stagingURL, to: downloadedModelURL)
+    }
+
+    private static func downloadFile(
+        from sourceURL: URL,
+        to destinationURL: URL,
+        progress: @escaping (Int64) async -> Void
+    ) async throws {
+        let delegate = ModelPackageFileDownloader(destinationURL: destinationURL, progress: progress)
+        let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+        defer { session.invalidateAndCancel() }
+
+        var request = URLRequest(url: sourceURL, timeoutInterval: 60)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+
+        try await withCheckedThrowingContinuation { continuation in
+            delegate.continuation = continuation
+            session.downloadTask(with: request).resume()
+        }
+    }
+}
+
+private final class ModelPackageFileDownloader: NSObject, URLSessionDownloadDelegate {
+    let destinationURL: URL
+    let progress: (Int64) async -> Void
+    var continuation: CheckedContinuation<Void, Error>?
+    private var didComplete = false
+
+    init(destinationURL: URL, progress: @escaping (Int64) async -> Void) {
+        self.destinationURL = destinationURL
+        self.progress = progress
+    }
+
+    func urlSession(_ session: URLSession,
+                    downloadTask: URLSessionDownloadTask,
+                    didWriteData bytesWritten: Int64,
+                    totalBytesWritten: Int64,
+                    totalBytesExpectedToWrite: Int64) {
+        Task {
+            await progress(totalBytesWritten)
+        }
+    }
+
+    func urlSession(_ session: URLSession,
+                    downloadTask: URLSessionDownloadTask,
+                    didFinishDownloadingTo location: URL) {
+        do {
+            guard let response = downloadTask.response as? HTTPURLResponse else {
+                throw ReconstructionModelDownloadError.invalidResponse
+            }
+            guard (200..<300).contains(response.statusCode) else {
+                throw ReconstructionModelDownloadError.httpStatus(response.statusCode)
+            }
+
+            let fileManager = FileManager.default
+            try fileManager.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? fileManager.removeItem(at: destinationURL)
+            try fileManager.moveItem(at: location, to: destinationURL)
+            complete(.success(()))
+        } catch {
+            complete(.failure(error))
+        }
+    }
+
+    func urlSession(_ session: URLSession,
+                    task: URLSessionTask,
+                    didCompleteWithError error: Error?) {
+        if let error {
+            complete(.failure(error))
+        }
+    }
+
+    private func complete(_ result: Result<Void, Error>) {
+        guard !didComplete else { return }
+        didComplete = true
+        continuation?.resume(with: result)
+        continuation = nil
+    }
+}
+
 /// Holds the model + renderer and drives reconstruction off the main thread.
 final class AppState: ObservableObject {
     @Published var status = ""
@@ -89,6 +446,7 @@ final class AppState: ObservableObject {
     @Published var saveState: SaveState = .idle
     @Published var subjectProtectionMask: UIImage?
     @Published var geminiKey: String
+    let modelStore = ReconstructionModelStore()
     var renderer: ReshootRenderer?
     private let modelQueue = DispatchQueue(label: "OpenReshoot.model", qos: .userInitiated)
     private var cachedModel: SharpModel?
@@ -202,9 +560,16 @@ final class AppState: ObservableObject {
             return cachedModel
         }
         print("⏳ [OpenReshoot] loading reconstruction model…")
-        let model = try SharpModel()
+        let model = try SharpModel(modelURL: modelStore.activeModelURL())
         cachedModel = model
         return model
+    }
+
+    func invalidateModelCache() {
+        modelQueue.async { [weak self] in
+            self?.cachedModel = nil
+            print("🧹 [OpenReshoot] reconstruction model cache invalidated")
+        }
     }
 
     @MainActor
@@ -681,7 +1046,7 @@ struct ContentView: View {
     @StateObject private var app = AppState()
     @State private var pickerItem: PhotosPickerItem?
     @State private var glowSpin = false
-    @State private var showingEnhanceSettings = false
+    @State private var showingSettings = false
     private let toolbarHeight: CGFloat = 88
 
     var body: some View {
@@ -749,8 +1114,8 @@ struct ContentView: View {
                 }
             }
         }
-        .sheet(isPresented: $showingEnhanceSettings) {
-            EnhanceSettingsView(app: app)
+        .sheet(isPresented: $showingSettings) {
+            SettingsView(app: app)
         }
         .tint(OpenReshootPalette.accent)
     }
@@ -825,6 +1190,29 @@ struct ContentView: View {
                 .buttonStyle(FluidPressButtonStyle(pressedScale: 0.985))
 
                 Spacer(minLength: 26)
+            }
+            .frame(width: size.width, height: size.height)
+
+            VStack {
+                HStack {
+                    Spacer()
+                    Button {
+                        showingSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                            .font(.system(size: 18, weight: .medium))
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(OpenReshootPalette.textSecondary.opacity(0.86))
+                            .frame(width: 44, height: 44)
+                            .contentShape(Circle())
+                            .openReshootGlassCircle()
+                    }
+                    .buttonStyle(FluidPressButtonStyle())
+                    .accessibilityLabel("设置")
+                    .padding(.trailing, 22)
+                    .padding(.top, max(size.height * 0.035, 28))
+                }
+                Spacer()
             }
             .frame(width: size.width, height: size.height)
         }
@@ -1133,11 +1521,11 @@ struct ContentView: View {
                 .buttonStyle(FluidPressButtonStyle())
             } else {
                 Button {
-                    showingEnhanceSettings = true
+                    showingSettings = true
                 } label: {
-                    plainUtilityIcon(systemName: "key")
+                    plainUtilityIcon(systemName: "gearshape")
                 }
-                .accessibilityLabel("重构设置")
+                .accessibilityLabel("设置")
                 .buttonStyle(FluidPressButtonStyle())
             }
         }
@@ -1176,19 +1564,84 @@ struct ContentView: View {
     }
 }
 
-struct EnhanceSettingsView: View {
+struct SettingsView: View {
     @ObservedObject var app: AppState
+    @ObservedObject private var modelStore: ReconstructionModelStore
     @Environment(\.dismiss) private var dismiss
     @State private var geminiKey: String
 
     init(app: AppState) {
         self.app = app
+        _modelStore = ObservedObject(wrappedValue: app.modelStore)
         _geminiKey = State(initialValue: app.geminiKey)
     }
 
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    HStack {
+                        Label("当前模型", systemImage: modelStateSymbol)
+                        Spacer()
+                        Text(modelStore.activeModelLabel)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if modelStore.isDownloading {
+                        VStack(alignment: .leading, spacing: 8) {
+                            if let fraction = modelStore.progress.fractionCompleted {
+                                ProgressView(value: fraction)
+                                Text(downloadProgressText)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                ProgressView()
+                                Text("正在下载模型")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    if case let .failed(message) = modelStore.installState {
+                        Label(message.isEmpty ? "下载失败" : message, systemImage: "exclamationmark.triangle")
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+
+                    HStack {
+                        Button {
+                            modelStore.installModel {
+                                app.invalidateModelCache()
+                            }
+                        } label: {
+                            Label(modelStore.hasDownloadedModel ? "重新下载" : "下载模型",
+                                  systemImage: "arrow.down.circle")
+                        }
+                        .disabled(modelStore.isDownloading)
+
+                        Spacer()
+
+                        if modelStore.isDownloading {
+                            Button(role: .cancel) {
+                                modelStore.cancelDownload()
+                            } label: {
+                                Label("取消", systemImage: "xmark.circle")
+                            }
+                        } else if modelStore.hasDownloadedModel {
+                            Button(role: .destructive) {
+                                modelStore.removeDownloadedModel {
+                                    app.invalidateModelCache()
+                                }
+                            } label: {
+                                Label("删除", systemImage: "trash")
+                            }
+                        }
+                    }
+                } header: {
+                    Text("模型")
+                }
+
                 Section {
                     Picker("质量", selection: $app.quality) {
                         ForEach(RenderQuality.allCases) { quality in
@@ -1204,8 +1657,6 @@ struct EnhanceSettingsView: View {
                         .autocorrectionDisabled()
                 } header: {
                     Text("Gemini 重构")
-                } footer: {
-                    Text("当前使用 gemini-3.1-flash-image。API Key 只保存在本机。")
                 }
                 Section {
                     Button(role: .destructive) {
@@ -1215,7 +1666,7 @@ struct EnhanceSettingsView: View {
                     }
                 }
             }
-            .navigationTitle("重构设置")
+            .navigationTitle("设置")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
@@ -1229,6 +1680,43 @@ struct EnhanceSettingsView: View {
             }
         }
     }
+
+    private var modelStateSymbol: String {
+        switch modelStore.installState {
+        case .downloaded:
+            return "checkmark.circle"
+        case .bundled:
+            return "shippingbox"
+        case .checkingSource, .downloading:
+            return "arrow.down.circle"
+        case .failed:
+            return "exclamationmark.triangle"
+        case .notInstalled:
+            return "circle"
+        }
+    }
+
+    private var downloadProgressText: String {
+        let progress = modelStore.progress
+        let received = Self.byteFormatter.string(fromByteCount: progress.bytesReceived)
+        if let total = progress.totalBytes {
+            let totalText = Self.byteFormatter.string(fromByteCount: total)
+            let percent = Int(((progress.fractionCompleted ?? 0) * 100).rounded(.down))
+            if let speed = progress.bytesPerSecond {
+                let speedText = Self.byteFormatter.string(fromByteCount: Int64(speed))
+                return "\(percent)% · \(received) / \(totalText) · \(speedText)/s"
+            }
+            return "\(percent)% · \(received) / \(totalText)"
+        }
+        return "已下载 \(received)"
+    }
+
+    private static let byteFormatter: ByteCountFormatter = {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useMB, .useGB]
+        formatter.countStyle = .file
+        return formatter
+    }()
 }
 
 struct MetalView: UIViewRepresentable {
