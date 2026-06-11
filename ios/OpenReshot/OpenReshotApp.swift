@@ -1569,6 +1569,7 @@ struct SettingsView: View {
     @ObservedObject private var modelStore: ReconstructionModelStore
     @Environment(\.dismiss) private var dismiss
     @State private var geminiKey: String
+    @State private var showingGeminiHelp = false
     private static let geminiAPIKeyURL = URL(string: "https://aistudio.google.com/app/apikey")!
 
     init(app: AppState) {
@@ -1578,39 +1579,115 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    HStack {
-                        Label("当前模型", systemImage: modelStateSymbol)
-                        Spacer()
-                        Text(modelStore.activeModelLabel)
-                            .foregroundStyle(.secondary)
+        ZStack {
+            SettingsSheetStyle.background.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                settingsTopBar
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 34) {
+                        Text("设置")
+                            .font(.system(size: 40, weight: .bold))
+                            .foregroundStyle(SettingsSheetStyle.primaryText)
+                            .padding(.top, 14)
+
+                        modelSection
+                        qualitySection
+                        geminiSection
+                        clearSection
                     }
+                    .padding(.horizontal, 34)
+                    .padding(.bottom, 56)
+                }
+                .scrollIndicators(.hidden)
+            }
+
+            if showingGeminiHelp {
+                GeminiAPIHelpOverlay(url: Self.geminiAPIKeyURL) {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        showingGeminiHelp = false
+                    }
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                .zIndex(10)
+            }
+        }
+    }
+
+    private var settingsTopBar: some View {
+        HStack {
+            Button("取消") {
+                dismiss()
+            }
+            .settingsChromeButton()
+
+            Spacer()
+
+            Button("保存") {
+                app.saveEnhanceSettings(key: geminiKey)
+                dismiss()
+            }
+            .settingsChromeButton()
+        }
+        .padding(.horizontal, 34)
+        .padding(.top, 18)
+        .padding(.bottom, 18)
+    }
+
+    private var modelSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            sectionLabel("模型")
+
+            settingsCard {
+                VStack(spacing: 0) {
+                    HStack(spacing: 16) {
+                        Image(systemName: modelStateSymbol)
+                            .font(.system(size: 23, weight: .regular))
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(OpenReshotPalette.accent)
+                            .frame(width: 30)
+
+                        Text("当前模型")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(SettingsSheetStyle.primaryText)
+
+                        Spacer()
+
+                        Text(modelStore.activeModelLabel)
+                            .font(.system(size: 16, weight: .regular))
+                            .foregroundStyle(SettingsSheetStyle.secondaryText)
+                    }
+                    .padding(.vertical, 15)
 
                     if modelStore.isDownloading {
                         VStack(alignment: .leading, spacing: 8) {
                             if let fraction = modelStore.progress.fractionCompleted {
                                 ProgressView(value: fraction)
-                                Text(downloadProgressText)
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
+                                    .tint(OpenReshotPalette.accent)
                             } else {
                                 ProgressView()
-                                Text("正在下载模型")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
+                                    .tint(OpenReshotPalette.accent)
                             }
+
+                            Text(downloadProgressText)
+                                .font(.system(size: 12, weight: .regular))
+                                .foregroundStyle(SettingsSheetStyle.tertiaryText)
                         }
+                        .padding(.bottom, 14)
                     }
 
                     if case let .failed(message) = modelStore.installState {
+                        divider
                         Label(message.isEmpty ? "下载失败" : message, systemImage: "exclamationmark.triangle")
-                            .font(.footnote)
-                            .foregroundStyle(.red)
+                            .font(.system(size: 12, weight: .regular))
+                            .foregroundStyle(Color.red.opacity(0.88))
+                            .padding(.vertical, 14)
                     }
 
-                    HStack {
+                    divider
+
+                    HStack(spacing: 18) {
                         Button {
                             modelStore.installModel {
                                 app.invalidateModelCache()
@@ -1620,6 +1697,7 @@ struct SettingsView: View {
                                   systemImage: "arrow.down.circle")
                         }
                         .disabled(modelStore.isDownloading)
+                        .buttonStyle(SettingsInlineButtonStyle())
 
                         Spacer()
 
@@ -1629,6 +1707,7 @@ struct SettingsView: View {
                             } label: {
                                 Label("取消", systemImage: "xmark.circle")
                             }
+                            .buttonStyle(SettingsInlineButtonStyle())
                         } else if modelStore.hasDownloadedModel {
                             Button(role: .destructive) {
                                 modelStore.removeDownloadedModel {
@@ -1637,57 +1716,99 @@ struct SettingsView: View {
                             } label: {
                                 Label("删除", systemImage: "trash")
                             }
+                            .buttonStyle(SettingsInlineButtonStyle(color: .red))
                         }
                     }
-                } header: {
-                    Text("模型")
-                }
-
-                Section {
-                    Picker("质量", selection: $app.quality) {
-                        ForEach(RenderQuality.allCases) { quality in
-                            Label(quality.title, systemImage: quality.systemImage)
-                                .tag(quality)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                }
-                Section {
-                    SecureField("Gemini API Key", text: $geminiKey)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-
-                    Link(destination: Self.geminiAPIKeyURL) {
-                        Label("打开 Google AI Studio", systemImage: "key")
-                    }
-
-                    Text("获取方法：登录 Google AI Studio，点击 Create API key，复制后粘贴到上方。请勿公开分享 API Key。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                } header: {
-                    Text("Gemini 重构")
-                }
-                Section {
-                    Button(role: .destructive) {
-                        geminiKey = ""
-                    } label: {
-                        Label("清除", systemImage: "trash")
-                    }
-                }
-            }
-            .navigationTitle("设置")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") {
-                        app.saveEnhanceSettings(key: geminiKey)
-                        dismiss()
-                    }
+                    .padding(.vertical, 15)
                 }
             }
         }
+    }
+
+    private var qualitySection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            sectionLabel("画质")
+
+            settingsCard {
+                Picker("质量", selection: $app.quality) {
+                    ForEach(RenderQuality.allCases) { quality in
+                        Text(quality.title).tag(quality)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.vertical, 14)
+            }
+        }
+    }
+
+    private var geminiSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            sectionLabel("Gemini 重构")
+
+            settingsCard {
+                SecureField("Gemini API Key", text: $geminiKey)
+                    .font(.system(size: 17, weight: .regular))
+                    .foregroundStyle(SettingsSheetStyle.primaryText)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .privacySensitive()
+                    .padding(.vertical, 16)
+            }
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    showingGeminiHelp = true
+                }
+            } label: {
+                Text("如何获取 Gemini API?")
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundStyle(SettingsSheetStyle.tertiaryText)
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, 4)
+        }
+    }
+
+    private var clearSection: some View {
+        Button(role: .destructive) {
+            geminiKey = ""
+        } label: {
+            HStack(spacing: 16) {
+                Image(systemName: "trash")
+                    .font(.system(size: 21, weight: .regular))
+                    .frame(width: 30)
+                Text("清除")
+                    .font(.system(size: 18, weight: .regular))
+                Spacer()
+            }
+            .padding(.horizontal, 26)
+            .padding(.vertical, 18)
+            .frame(maxWidth: .infinity)
+            .background(SettingsSheetStyle.cardFill, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.red.opacity(0.88))
+        .padding(.top, 10)
+    }
+
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 17, weight: .semibold))
+            .foregroundStyle(SettingsSheetStyle.secondaryText)
+            .padding(.leading, 22)
+    }
+
+    private func settingsCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .padding(.horizontal, 26)
+            .frame(maxWidth: .infinity)
+            .background(SettingsSheetStyle.cardFill, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    private var divider: some View {
+        Rectangle()
+            .fill(SettingsSheetStyle.hairline)
+            .frame(height: 1)
     }
 
     private var modelStateSymbol: String {
@@ -1726,6 +1847,128 @@ struct SettingsView: View {
         formatter.countStyle = .file
         return formatter
     }()
+}
+
+private enum SettingsSheetStyle {
+    static let background = Color(uiColor: .systemGroupedBackground)
+    static let cardFill = Color(uiColor: .secondarySystemGroupedBackground).opacity(0.92)
+    static let controlFill = Color(uiColor: .tertiarySystemFill)
+    static let primaryText = Color(uiColor: .label)
+    static let secondaryText = Color(uiColor: .secondaryLabel)
+    static let tertiaryText = Color(uiColor: .tertiaryLabel)
+    static let hairline = Color(uiColor: .separator).opacity(0.48)
+}
+
+private struct SettingsChromeButtonModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .font(.system(size: 17, weight: .semibold))
+            .foregroundStyle(OpenReshotPalette.accent)
+            .padding(.horizontal, 19)
+            .frame(height: 48)
+            .background(SettingsSheetStyle.controlFill, in: Capsule())
+            .overlay(
+                Capsule()
+                    .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
+            )
+    }
+}
+
+private extension View {
+    func settingsChromeButton() -> some View {
+        modifier(SettingsChromeButtonModifier())
+    }
+}
+
+private struct SettingsInlineButtonStyle: ButtonStyle {
+    var color: Color = OpenReshotPalette.accent
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 17, weight: .regular))
+            .symbolRenderingMode(.hierarchical)
+            .foregroundStyle(color.opacity(configuration.isPressed ? 0.62 : 0.94))
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+    }
+}
+
+private struct GeminiAPIHelpOverlay: View {
+    let url: URL
+    let onDismiss: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.34)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onDismiss)
+
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(alignment: .top, spacing: 12) {
+                    Text("如何获取 Gemini API?")
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(SettingsSheetStyle.primaryText)
+
+                    Spacer(minLength: 12)
+
+                    Button(action: onDismiss) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(SettingsSheetStyle.secondaryText)
+                            .frame(width: 28, height: 28)
+                            .background(SettingsSheetStyle.controlFill, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    helpStep("1", "登录 Google AI Studio。")
+                    helpStep("2", "点击 Create API key。")
+                    helpStep("3", "复制生成的 key，回到这里粘贴保存。")
+                }
+
+                Text("API Key 只保存在本机。不要发到公开仓库、截图或聊天里。")
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundStyle(SettingsSheetStyle.secondaryText)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Link(destination: url) {
+                    Label("打开 Google AI Studio", systemImage: "key")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(SettingsSheetStyle.primaryText)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 13)
+                        .background(OpenReshotPalette.accent.opacity(0.20), in: Capsule())
+                }
+            }
+            .padding(22)
+            .frame(maxWidth: 330)
+            .background(SettingsSheetStyle.cardFill, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .strokeBorder(SettingsSheetStyle.hairline, lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.22), radius: 24, y: 18)
+            .padding(.horizontal, 28)
+        }
+    }
+
+    private func helpStep(_ number: String, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text(number)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(SettingsSheetStyle.primaryText)
+                .frame(width: 20, height: 20)
+                .background(SettingsSheetStyle.controlFill, in: Circle())
+
+            Text(text)
+                .font(.system(size: 14, weight: .regular))
+                .foregroundStyle(SettingsSheetStyle.primaryText)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
 }
 
 struct MetalView: UIViewRepresentable {
