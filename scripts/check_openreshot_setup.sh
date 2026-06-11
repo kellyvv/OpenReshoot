@@ -65,9 +65,9 @@ check_command "xcodegen" "XcodeGen available" "install XcodeGen: brew install xc
 check_command "xcodebuild" "xcodebuild available" "install Xcode from the App Store or Apple Developer"
 
 if command -v "$PYTHON_BIN" >/dev/null 2>&1; then
-  check_python_import "torch" "torch import works" "install base dependencies: pip install -r requirements.txt"
-  check_python_import "coremltools" "coremltools import works" "install iOS conversion dependencies: pip install -r requirements-ios.txt"
-  check_python_import_optional "google.genai" "google-genai import works" "optional web prototype dependency missing: pip install -r requirements-web.txt"
+  check_python_import "torch" "torch import works" "install base dependencies: pip install -r requirements/requirements.txt"
+  check_python_import "coremltools" "coremltools import works" "install iOS conversion dependencies: pip install -r requirements/requirements-ios.txt"
+  check_python_import_optional "google.genai" "google-genai import works" "optional web prototype dependency missing: pip install -r requirements/requirements-web.txt"
 fi
 
 if [ -f "$ROOT/model/sharp_2572gikvuh.pt" ]; then

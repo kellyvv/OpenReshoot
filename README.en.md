@@ -106,7 +106,7 @@ SHARP.mlpackage/
   Data/com.apple.CoreML/weights/weight.bin
 ```
 
-After download, the app compiles the package locally into `SHARP.mlmodelc`. Photo selection and photo motion then run through on-device Core ML inference. The model is based on the Apple SHARP research model; see [LICENSE_MODEL](LICENSE_MODEL) and the Hugging Face model card for model licensing.
+After download, the app compiles the package locally into `SHARP.mlmodelc`. Photo selection and photo motion then run through on-device Core ML inference. The model is based on the Apple SHARP research model; see [docs/LICENSE_MODEL](docs/LICENSE_MODEL) and the Hugging Face model card for model licensing.
 
 ## Gemini API Key
 
@@ -126,9 +126,9 @@ The local photo motion experience does not need a Gemini API key. Gemini is only
 The repository keeps the Python / MPS web prototype mainly for contributors who want to compare the iOS result with the PC flow. Regular iOS use does not require it.
 
 ```bash
-pip install -r requirements-web.txt
+pip install -r requirements/requirements-web.txt
 export GEMINI_API_KEY="your-key"
-bash run.sh
+bash prototype/run.sh
 ```
 
 Then open `http://127.0.0.1:8765/splat/`.
@@ -141,4 +141,4 @@ Issues, screenshots, and short reproduction videos are welcome. For iOS viewer, 
 
 OpenReshot-owned source code is licensed under the [Apache License 2.0](LICENSE), matching PhoneClaw.
 
-Apple SHARP upstream source licensing is preserved in [LICENSE_APPLE_SHARP](LICENSE_APPLE_SHARP), and the released model license is in [LICENSE_MODEL](LICENSE_MODEL). Also see [ACKNOWLEDGEMENTS](ACKNOWLEDGEMENTS) for upstream open-source notices.
+Apple SHARP upstream source licensing is preserved in [docs/LICENSE_APPLE_SHARP](docs/LICENSE_APPLE_SHARP), and the released model license is in [docs/LICENSE_MODEL](docs/LICENSE_MODEL). Also see [docs/ACKNOWLEDGEMENTS](docs/ACKNOWLEDGEMENTS) for upstream open-source notices.

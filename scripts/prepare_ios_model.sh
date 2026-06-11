@@ -12,7 +12,7 @@ mkdir -p "$ROOT/model" "$ROOT/out" "$ROOT/ios/OpenReshot"
 if ! "$PYTHON_BIN" -c "import coremltools" >/dev/null 2>&1; then
   echo "coremltools is missing."
   echo "Install iOS conversion dependencies first:"
-  echo "  $PYTHON_BIN -m pip install -r \"$ROOT/requirements-ios.txt\""
+  echo "  $PYTHON_BIN -m pip install -r \"$ROOT/requirements/requirements-ios.txt\""
   exit 1
 fi
 

@@ -2,17 +2,17 @@
 # Launch the OpenReshot local comparison viewer.
 #
 # 1) Install web prototype dependencies:
-#       pip install -r requirements-web.txt
+#       pip install -r requirements/requirements-web.txt
 # 2) Set your Gemini key first (only needed for the "重构" / AI step):
 #       export GEMINI_API_KEY="你的key"
 # 3) Then run this script:
-#       bash run.sh
+#       bash prototype/run.sh
 # 4) Open http://127.0.0.1:8765/splat/ in your browser.
 #
 # Keep this terminal open — the server runs here (so it stays alive and can see your key).
 
 set -e
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 # free the port if an old server is still running
 pkill -f "serve_viewer.py" 2>/dev/null || true

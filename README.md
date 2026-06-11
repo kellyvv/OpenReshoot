@@ -106,7 +106,7 @@ SHARP.mlpackage/
   Data/com.apple.CoreML/weights/weight.bin
 ```
 
-下载完成后，App 会在本机编译为 `SHARP.mlmodelc`，之后选图和照片动效都走本机 Core ML 推理。这个模型来自 Apple SHARP research model，模型许可见 [LICENSE_MODEL](LICENSE_MODEL)，HF 模型卡也包含同一份许可证。
+下载完成后，App 会在本机编译为 `SHARP.mlmodelc`，之后选图和照片动效都走本机 Core ML 推理。这个模型来自 Apple SHARP research model，模型许可见 [docs/LICENSE_MODEL](docs/LICENSE_MODEL)，HF 模型卡也包含同一份许可证。
 
 ## Gemini API Key
 
@@ -126,9 +126,9 @@ OpenReshot 当前使用 `gemini-3.1-flash-image` 生成重构后的最终照片�
 仓库保留了 Python / MPS 的本地 Web 原型，主要用于贡献者对齐 PC 端效果。普通 iOS 使用不需要运行它。
 
 ```bash
-pip install -r requirements-web.txt
+pip install -r requirements/requirements-web.txt
 export GEMINI_API_KEY="your-key"
-bash run.sh
+bash prototype/run.sh
 ```
 
 然后打开 `http://127.0.0.1:8765/splat/`。
@@ -141,4 +141,4 @@ bash run.sh
 
 OpenReshot 自有源码采用 [Apache License 2.0](LICENSE)，与 PhoneClaw 保持一致。
 
-Apple SHARP 相关上游源码许可见 [LICENSE_APPLE_SHARP](LICENSE_APPLE_SHARP)，模型许可见 [LICENSE_MODEL](LICENSE_MODEL)。上游开源声明见 [ACKNOWLEDGEMENTS](ACKNOWLEDGEMENTS)。
+Apple SHARP 相关上游源码许可见 [docs/LICENSE_APPLE_SHARP](docs/LICENSE_APPLE_SHARP)，模型许可见 [docs/LICENSE_MODEL](docs/LICENSE_MODEL)。上游开源声明见 [docs/ACKNOWLEDGEMENTS](docs/ACKNOWLEDGEMENTS)。

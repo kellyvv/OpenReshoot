@@ -1,7 +1,7 @@
 # Core ML conversion dependencies for the iOS app.
 #
 # Install from the repository root:
-#   pip install -r requirements-ios.txt
+#   pip install -r requirements/requirements-ios.txt
 
 -r requirements.txt
 coremltools
