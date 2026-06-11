@@ -19,7 +19,7 @@
 
   <p>
     <a href="#core-experience">Core Experience</a> ·
-    <a href="#latest-status">Latest Status</a> ·
+    <a href="#latest-updates">Latest Updates</a> ·
     <a href="#quick-start">Quick Start</a> ·
     <a href="#model-download">Model Download</a> ·
     <a href="#gemini-api-key">Gemini API Key</a> ·
@@ -44,15 +44,26 @@ After WWDC 2026, spatial photos and angle-aware photo viewing became one of the 
 - Native iOS flow: system photo picker, native controls, and system photo library saving.
 - Local photo motion: after downloading the model, photo motion runs on device and does not need a Gemini API key or a PC server.
 
-## Latest Status
+## Latest Updates
 
-2026-06-11
+**2026-06-12**
+
+- OpenReshot has been submitted to Apple TestFlight beta review and is currently waiting for Apple processing.
+- TestFlight review usually takes about 1-2 days; the TestFlight invite link will be added here after approval.
+- Future installs and testing will go through TestFlight directly, without manually building to a device from Xcode.
+
+<details>
+<summary>Previous updates</summary>
+
+### 2026-06-11
 
 - The iOS flow now matches the PC flow: pick a photo, view motion, reshoot the current angle, and save the result.
 - The iOS app is packaged as a lightweight shell by default and does not bundle the 1GB+ model; first use downloads the Core ML model from Hugging Face in Settings.
 - The viewer includes glow, sheen, cover fade, and colorful missing-area treatment.
 - The bottom controls now use a quieter PhoneClaw-style visual direction and blend directly into the background.
 - The model repository is public on [Hugging Face](https://huggingface.co/kellyxiaowei/openreshoot-sharp-coreml), where the `SHARP.mlpackage` source files can be inspected directly.
+
+</details>
 
 ## Quick Start
 

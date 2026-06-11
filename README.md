@@ -19,7 +19,7 @@
 
   <p>
     <a href="#核心体验">核心体验</a> ·
-    <a href="#最新状态">最新状态</a> ·
+    <a href="#最新更新">最新更新</a> ·
     <a href="#快速开始">快速开始</a> ·
     <a href="#模型下载">模型下载</a> ·
     <a href="#gemini-api-key">Gemini API Key</a> ·
@@ -44,15 +44,26 @@ WWDC 2026 之后，空间照片和可变视角照片成为 iOS 27 时代很有�
 - 原生 iOS 体验：使用系统照片选择器、原生按钮和相册保存流程，不需要打开网页。
 - 本地照片动效：下载模型后，照片动效在设备本地运行，不需要 Gemini API key，也不需要连接 PC 服务端。
 
-## 最新状态
+## 最新更新
 
-2026-06-11
+**2026-06-12**
+
+- OpenReshot 已提交 Apple TestFlight 审核，当前等待 Apple 处理。
+- TestFlight 审核通常需要 1-2 天；通过后会在这里补充 TestFlight 邀请链接。
+- 后续体验会直接通过 TestFlight 安装，不需要再手动用 Xcode 打包到手机。
+
+<details>
+<summary>历史更新</summary>
+
+### 2026-06-11
 
 - iOS 主流程已对齐 PC：选图、照片动效、当前角度重构、结果保存。
 - iOS 默认打包为空壳 App，不内置 1GB+ 模型；首次使用可在设置里从 Hugging Face 下载 Core ML 模型。
 - 查看器动效已补齐 glow、sheen、cover fade 和多彩缺失区域处理。
 - 底部操作区改成更克制的 PhoneClaw 同系风格，按钮直接融合在背景里。
 - 模型仓库已发布到 [Hugging Face](https://huggingface.co/kellyxiaowei/openreshoot-sharp-coreml)，可直接查看 `SHARP.mlpackage` 源文件。
+
+</details>
 
 ## 快速开始
 
