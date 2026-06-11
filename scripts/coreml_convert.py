@@ -1,4 +1,4 @@
-"""Convert the OpenReshoot reconstruction network to a Core ML fp16 .mlpackage.
+"""Convert the OpenReshot reconstruction network to a Core ML fp16 .mlpackage.
 
 Only the neural forward goes into Core ML (depth=None makes depth_alignment a
 no-op). The NDC->metric unprojection + covariance SVD + 3DGS rendering stay

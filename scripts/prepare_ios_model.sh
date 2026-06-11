@@ -5,9 +5,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON_BIN="${PYTHON:-python3}"
 CHECKPOINT="$ROOT/model/sharp_2572gikvuh.pt"
 MLPACKAGE_OUT="$ROOT/out/SHARP.mlpackage"
-MLPACKAGE_IOS="$ROOT/ios/OpenReshoot/SHARP.mlpackage"
+MLPACKAGE_IOS="$ROOT/ios/OpenReshot/SHARP.mlpackage"
 
-mkdir -p "$ROOT/model" "$ROOT/out" "$ROOT/ios/OpenReshoot"
+mkdir -p "$ROOT/model" "$ROOT/out" "$ROOT/ios/OpenReshot"
 
 if ! "$PYTHON_BIN" -c "import coremltools" >/dev/null 2>&1; then
   echo "coremltools is missing."
@@ -41,4 +41,4 @@ echo
 echo "Ready. Next:"
 echo "  cd ios"
 echo "  xcodegen generate"
-echo "  open OpenReshoot.xcodeproj"
+echo "  open OpenReshot.xcodeproj"

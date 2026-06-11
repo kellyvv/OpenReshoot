@@ -44,14 +44,14 @@ check_python_import_optional() {
   fi
 }
 
-echo "OpenReshoot setup check"
+echo "OpenReshot setup check"
 echo "Repo: $ROOT"
 echo
 
-if [ -f "$ROOT/README.md" ] && [ -d "$ROOT/ios/OpenReshoot" ]; then
+if [ -f "$ROOT/README.md" ] && [ -d "$ROOT/ios/OpenReshot" ]; then
   pass "repository layout looks correct"
 else
-  fail "run this script from a complete OpenReshoot checkout"
+  fail "run this script from a complete OpenReshot checkout"
 fi
 
 if command -v "$PYTHON_BIN" >/dev/null 2>&1; then
@@ -82,14 +82,14 @@ else
   warn "converted Core ML model missing; run scripts/prepare_ios_model.sh"
 fi
 
-if [ -d "$ROOT/ios/OpenReshoot/SHARP.mlpackage" ]; then
-  pass "iOS model package exists: ios/OpenReshoot/SHARP.mlpackage"
+if [ -d "$ROOT/ios/OpenReshot/SHARP.mlpackage" ]; then
+  pass "iOS model package exists: ios/OpenReshot/SHARP.mlpackage"
 else
   warn "iOS model package missing; run scripts/prepare_ios_model.sh"
 fi
 
-if [ -d "$ROOT/ios/OpenReshoot.xcodeproj" ]; then
-  pass "Xcode project exists: ios/OpenReshoot.xcodeproj"
+if [ -d "$ROOT/ios/OpenReshot.xcodeproj" ]; then
+  pass "Xcode project exists: ios/OpenReshot.xcodeproj"
 else
   warn "Xcode project missing; run: cd ios && xcodegen generate"
 fi

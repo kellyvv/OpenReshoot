@@ -27,15 +27,15 @@ final class SharpModel {
         } else if let bundledURL = Bundle.main.url(forResource: "SHARP", withExtension: "mlmodelc") {
             resolvedURL = bundledURL
         } else {
-            throw err("Reconstruction model not in bundle — add SHARP.mlpackage to the OpenReshoot target.")
+            throw err("Reconstruction model not in bundle — add SHARP.mlpackage to the OpenReshot target.")
         }
         let cfg = MLModelConfiguration()
         // .all makes Core ML try to place this 700M/1536² model on the Neural Engine,
         // whose compile/partition step hangs for a model this large. GPU is plenty.
         cfg.computeUnits = .cpuAndGPU
-        print("⏳ [OpenReshoot] MLModel(contentsOf:) loading \(resolvedURL.lastPathComponent)…")
+        print("⏳ [OpenReshot] MLModel(contentsOf:) loading \(resolvedURL.lastPathComponent)…")
         model = try MLModel(contentsOf: resolvedURL, configuration: cfg)
-        print("✅ [OpenReshoot] MLModel ready")
+        print("✅ [OpenReshot] MLModel ready")
     }
 
     func reconstruct(_ image: UIImage, sourceData: Data? = nil) throws -> SharpOutput {
@@ -45,7 +45,7 @@ final class SharpModel {
         let focal35mm = Self.focalLength35mm(from: sourceData) ?? 30
         let fpx = focal35mm * (Float(w * w + h * h)).squareRoot() / Float(36 * 36 + 24 * 24).squareRoot()
         let disp = fpx / Float(w)
-        print("📷 [OpenReshoot] focal35mm=\(focal35mm), fpx=\(fpx), disp=\(disp)")
+        print("📷 [OpenReshot] focal35mm=\(focal35mm), fpx=\(fpx), disp=\(disp)")
 
         let imageArr = try Self.preprocess(normalized, side: Self.internalRes)
         let dispArr = try MLMultiArray(shape: [1], dataType: .float32)
@@ -135,5 +135,5 @@ final class SharpModel {
 }
 
 func err(_ msg: String) -> NSError {
-    NSError(domain: "OpenReshoot", code: -1, userInfo: [NSLocalizedDescriptionKey: msg])
+    NSError(domain: "OpenReshot", code: -1, userInfo: [NSLocalizedDescriptionKey: msg])
 }

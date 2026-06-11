@@ -55,7 +55,7 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
     func setCloud(_ points: [SplatPoint], focus: Float, fpx: Float, width: Int, height: Int) {
         self.fpx = fpx; imgW = Float(width); imgH = Float(height); self.focus = focus
         amplitude = SIMD2(min(0.60, focus * 0.22), min(0.40, focus * 0.15))
-        print("🎛️ [OpenReshoot] motion amplitude x=\(amplitude.x), y=\(amplitude.y), focus=\(focus)")
+        print("🎛️ [OpenReshot] motion amplitude x=\(amplitude.x), y=\(amplitude.y), focus=\(focus)")
         guard let view else { return }
         let cf = view.colorPixelFormat, df = view.depthStencilPixelFormat, sc = view.sampleCount
         cloudTask?.cancel()
@@ -91,11 +91,11 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
                 await MainActor.run { [weak self] in
                     self?.splat = r
                     self?.view?.setNeedsDisplay()
-                    print("✅ [OpenReshoot] MetalSplatter ready, \(r.splatCount) splats")
+                    print("✅ [OpenReshot] MetalSplatter ready, \(r.splatCount) splats")
                 }
             } catch {
                 await MainActor.run {
-                    print("❌ [OpenReshoot] MetalSplatter setup failed: \(error)")
+                    print("❌ [OpenReshot] MetalSplatter setup failed: \(error)")
                 }
             }
         }
@@ -197,7 +197,7 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
                                       to: cmd)
             if ok { cmd.present(drawable) }
         } catch {
-            print("❌ [OpenReshoot] render error: \(error)")
+            print("❌ [OpenReshot] render error: \(error)")
         }
         cmd.commit()
     }

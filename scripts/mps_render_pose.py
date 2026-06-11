@@ -1,4 +1,4 @@
-"""Render an OpenReshoot reconstruction scene from off-axis camera poses.
+"""Render an OpenReshot reconstruction scene from off-axis camera poses.
 
 This utility renders the scene from one or more shifted camera positions and,
 for each, writes:

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Launch the OpenReshoot local comparison viewer.
+# Launch the OpenReshot local comparison viewer.
 #
 # 1) Install web prototype dependencies:
 #       pip install -r requirements-web.txt

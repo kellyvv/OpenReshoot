@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>OpenReshoot</h1>
+  <h1>OpenReshot</h1>
 
   <p><strong>Reshoot an ordinary photo from a new angle.</strong></p>
 
@@ -13,8 +13,8 @@
 
   <p>
     <a href="README.md">中文</a> ·
-    <a href="https://github.com/kellyvv/OpenReshoot/issues">Issues</a> ·
-    <a href="https://github.com/kellyvv/OpenReshoot/issues">Feature requests</a>
+    <a href="https://github.com/kellyvv/OpenReshot/issues">Issues</a> ·
+    <a href="https://github.com/kellyvv/OpenReshot/issues">Feature requests</a>
   </p>
 
   <p>
@@ -28,9 +28,9 @@
   </p>
 </div>
 
-OpenReshoot is a native iOS photo motion app. Pick a photo, drag inside a fixed frame, and the photo feels like it was captured from a different angle. When the view looks right, tap Reshoot to generate the final photo for that angle and save it back to the system photo library.
+OpenReshot is a native iOS photo motion app. Pick a photo, drag inside a fixed frame, and the photo feels like it was captured from a different angle. When the view looks right, tap Reshoot to generate the final photo for that angle and save it back to the system photo library.
 
-After WWDC 2026, spatial photos and angle-aware photo viewing became one of the most interesting iOS 27-era directions. Many users still cannot try that experience immediately because of system or device limits. OpenReshoot brings the idea of "view it from another angle, then reshoot it from that angle" to more iPhones and iPads.
+After WWDC 2026, spatial photos and angle-aware photo viewing became one of the most interesting iOS 27-era directions. Many users still cannot try that experience immediately because of system or device limits. OpenReshot brings the idea of "view it from another angle, then reshoot it from that angle" to more iPhones and iPads.
 
 <div align="center">
   <video src="https://github.com/user-attachments/assets/57ccefa4-ae91-4185-ba59-5f2f672e9c61" width="760" controls muted playsinline></video>
@@ -65,14 +65,14 @@ Requirements:
 Prepare the project:
 
 ```bash
-git clone https://github.com/kellyvv/OpenReshoot.git
-cd OpenReshoot
+git clone https://github.com/kellyvv/OpenReshot.git
+cd OpenReshot
 cd ios
 xcodegen generate
-open OpenReshoot.xcodeproj
+open OpenReshot.xcodeproj
 ```
 
-In Xcode, select the `OpenReshoot` target, set your signing team, choose a real iOS device, and run. The default build does not include `SHARP.mlpackage`, keeping the app bundle lightweight.
+In Xcode, select the `OpenReshot` target, set your signing team, choose a real iOS device, and run. The default build does not include `SHARP.mlpackage`, keeping the app bundle lightweight.
 
 More iOS-specific details are in [ios/README.md](ios/README.md).
 
@@ -99,7 +99,7 @@ After download, the app compiles the package locally into `SHARP.mlmodelc`. Phot
 
 ## Gemini API Key
 
-OpenReshoot currently uses `gemini-3.1-flash-image` to generate the final Reshoot photo. The app does not include a shared public API key, so users need to enter their own Gemini API key.
+OpenReshot currently uses `gemini-3.1-flash-image` to generate the final Reshoot photo. The app does not include a shared public API key, so users need to enter their own Gemini API key.
 
 Setup:
 
@@ -128,6 +128,6 @@ Issues, screenshots, and short reproduction videos are welcome. For iOS viewer, 
 
 ## License
 
-OpenReshoot-owned source code is licensed under the [Apache License 2.0](LICENSE), matching PhoneClaw.
+OpenReshot-owned source code is licensed under the [Apache License 2.0](LICENSE), matching PhoneClaw.
 
 Apple SHARP upstream source licensing is preserved in [LICENSE_APPLE_SHARP](LICENSE_APPLE_SHARP), and the released model license is in [LICENSE_MODEL](LICENSE_MODEL). Also see [ACKNOWLEDGEMENTS](ACKNOWLEDGEMENTS) for upstream open-source notices.

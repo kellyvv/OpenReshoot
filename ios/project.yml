@@ -1,6 +1,6 @@
-name: OpenReshoot
+name: OpenReshot
 options:
-  bundleIdPrefix: com.openreshoot
+  bundleIdPrefix: com.openreshot
   deploymentTarget:
     iOS: "18.0"          # MetalSplatter requires iOS 18+
   createIntermediateGroups: true
@@ -11,30 +11,30 @@ packages:
     from: "1.0.1"
 
 schemes:
-  OpenReshoot:
+  OpenReshot:
     build:
       targets:
-        OpenReshoot: all
+        OpenReshot: all
     run:
       config: Debug
     archive:
       config: Release
 
 targets:
-  OpenReshoot:
+  OpenReshot:
     type: application
     platform: iOS
     sources:
-      - path: OpenReshoot
+      - path: OpenReshot
         excludes:
           - SHARP.mlpackage
     info:
-      path: OpenReshoot/Info.plist
+      path: OpenReshot/Info.plist
       properties:
         CFBundleDisplayName: Reshoot
         NSPhotoLibraryUsageDescription: "Pick a photo to turn into a 3D parallax view."
         NSPhotoLibraryAddUsageDescription: "Save the reconstructed photo to your library."
-        OpenReshootModelDownloadBaseURL: "https://huggingface.co/kellyxiaowei/openreshoot-sharp-coreml/resolve/main/SHARP.mlpackage"
+        OpenReshotModelDownloadBaseURL: "https://huggingface.co/kellyxiaowei/openreshoot-sharp-coreml/resolve/main/SHARP.mlpackage"
         UILaunchScreen: {}
         UIRequiresFullScreen: true
         UIApplicationSceneManifest:
@@ -53,5 +53,5 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         # 1536x1536 activations are heavy — ask iOS for the raised memory cap.
         # (Requires a provisioning profile that allows the entitlement.)
-        CODE_SIGN_ENTITLEMENTS: OpenReshoot/OpenReshoot.entitlements
+        CODE_SIGN_ENTITLEMENTS: OpenReshot/OpenReshot.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

@@ -1,6 +1,6 @@
 # Code of Conduct
 
-OpenReshoot should be a practical and respectful project space.
+OpenReshot should be a practical and respectful project space.
 
 ## Standards
 

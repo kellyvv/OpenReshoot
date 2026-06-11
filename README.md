@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>OpenReshoot</h1>
+  <h1>OpenReshot</h1>
 
   <p><strong>把一张普通照片，换个角度重新拍出来。</strong></p>
 
@@ -13,8 +13,8 @@
 
   <p>
     <a href="README.en.md">English</a> ·
-    <a href="https://github.com/kellyvv/OpenReshoot/issues">反馈问题</a> ·
-    <a href="https://github.com/kellyvv/OpenReshoot/issues">功能建议</a>
+    <a href="https://github.com/kellyvv/OpenReshot/issues">反馈问题</a> ·
+    <a href="https://github.com/kellyvv/OpenReshot/issues">功能建议</a>
   </p>
 
   <p>
@@ -28,9 +28,9 @@
   </p>
 </div>
 
-OpenReshoot 是一个原生 iOS 照片动效应用。选择一张照片后，你可以在固定画框里轻轻拖动视角，让照片像是从另一个角度被重新拍摄；满意后点击重构，生成当前视角的最终照片，并保存回系统相册。
+OpenReshot 是一个原生 iOS 照片动效应用。选择一张照片后，你可以在固定画框里轻轻拖动视角，让照片像是从另一个角度被重新拍摄；满意后点击重构，生成当前视角的最终照片，并保存回系统相册。
 
-WWDC 2026 之后，空间照片和可变视角照片成为 iOS 27 时代很有吸引力的新体验。但很多用户会因为系统版本或设备限制暂时用不上。OpenReshoot 想做的就是把这种“普通照片也能换角度看、换角度拍”的体验，带给更多 iPhone 和 iPad。
+WWDC 2026 之后，空间照片和可变视角照片成为 iOS 27 时代很有吸引力的新体验。但很多用户会因为系统版本或设备限制暂时用不上。OpenReshot 想做的就是把这种“普通照片也能换角度看、换角度拍”的体验，带给更多 iPhone 和 iPad。
 
 <div align="center">
   <video src="https://github.com/user-attachments/assets/57ccefa4-ae91-4185-ba59-5f2f672e9c61" width="760" controls muted playsinline></video>
@@ -65,14 +65,14 @@ WWDC 2026 之后，空间照片和可变视角照片成为 iOS 27 时代很有�
 准备工程：
 
 ```bash
-git clone https://github.com/kellyvv/OpenReshoot.git
-cd OpenReshoot
+git clone https://github.com/kellyvv/OpenReshot.git
+cd OpenReshot
 cd ios
 xcodegen generate
-open OpenReshoot.xcodeproj
+open OpenReshot.xcodeproj
 ```
 
-在 Xcode 中选择 `OpenReshoot` target，配置签名 Team，选择真机运行。默认构建不包含 `SHARP.mlpackage`，App 包体积保持轻量。
+在 Xcode 中选择 `OpenReshot` target，配置签名 Team，选择真机运行。默认构建不包含 `SHARP.mlpackage`，App 包体积保持轻量。
 
 iOS 细节见 [ios/README.md](ios/README.md)。
 
@@ -99,7 +99,7 @@ SHARP.mlpackage/
 
 ## Gemini API Key
 
-OpenReshoot 当前使用 `gemini-3.1-flash-image` 生成重构后的最终照片。应用不内置公共 API key，用户需要填写自己的 Gemini API key。
+OpenReshot 当前使用 `gemini-3.1-flash-image` 生成重构后的最终照片。应用不内置公共 API key，用户需要填写自己的 Gemini API key。
 
 设置方式：
 
@@ -128,6 +128,6 @@ bash run.sh
 
 ## 许可
 
-OpenReshoot 自有源码采用 [Apache License 2.0](LICENSE)，与 PhoneClaw 保持一致。
+OpenReshot 自有源码采用 [Apache License 2.0](LICENSE)，与 PhoneClaw 保持一致。
 
 Apple SHARP 相关上游源码许可见 [LICENSE_APPLE_SHARP](LICENSE_APPLE_SHARP)，模型许可见 [LICENSE_MODEL](LICENSE_MODEL)。上游开源声明见 [ACKNOWLEDGEMENTS](ACKNOWLEDGEMENTS)。

@@ -11,7 +11,7 @@ import Vision
 import simd
 
 @main
-struct OpenReshootApp: App {
+struct OpenReshotApp: App {
     var body: some Scene {
         WindowGroup { ContentView() }
     }
@@ -111,7 +111,7 @@ private enum ReconstructionModelDownloadError: LocalizedError {
     }
 }
 
-/// PhoneClaw-style model installer state, scoped to OpenReshoot's single Core ML asset.
+/// PhoneClaw-style model installer state, scoped to OpenReshot's single Core ML asset.
 final class ReconstructionModelStore: ObservableObject {
     @Published private(set) var installState: ReconstructionModelInstallState = .notInstalled
     @Published private(set) var progress = ReconstructionDownloadProgress()
@@ -257,7 +257,7 @@ final class ReconstructionModelStore: ObservableObject {
     ]
 
     private static var builtInDownloadBaseURL: URL? {
-        guard let value = Bundle.main.object(forInfoDictionaryKey: "OpenReshootModelDownloadBaseURL") as? String else {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: "OpenReshotModelDownloadBaseURL") as? String else {
             return nil
         }
         let trimmed = value
@@ -277,7 +277,7 @@ final class ReconstructionModelStore: ObservableObject {
     private static var modelsDirectory: URL {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         return support
-            .appendingPathComponent("OpenReshoot", isDirectory: true)
+            .appendingPathComponent("OpenReshot", isDirectory: true)
             .appendingPathComponent("Models", isDirectory: true)
     }
 
@@ -305,7 +305,7 @@ final class ReconstructionModelStore: ObservableObject {
 
         let fileManager = FileManager.default
         let tempDirectory = fileManager.temporaryDirectory
-            .appendingPathComponent("OpenReshootModel-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("OpenReshotModel-\(UUID().uuidString)", isDirectory: true)
         try fileManager.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
         defer { try? fileManager.removeItem(at: tempDirectory) }
 
@@ -448,7 +448,7 @@ final class AppState: ObservableObject {
     @Published var geminiKey: String
     let modelStore = ReconstructionModelStore()
     var renderer: ReshootRenderer?
-    private let modelQueue = DispatchQueue(label: "OpenReshoot.model", qos: .userInitiated)
+    private let modelQueue = DispatchQueue(label: "OpenReshot.model", qos: .userInitiated)
     private var cachedModel: SharpModel?
     private var memoryWarningObserver: NSObjectProtocol?
     private var subjectMaskRequestID = UUID()
@@ -460,7 +460,7 @@ final class AppState: ObservableObject {
     """
 
     init() {
-        geminiKey = UserDefaults.standard.string(forKey: "OpenReshoot.geminiKey") ?? ""
+        geminiKey = UserDefaults.standard.string(forKey: "OpenReshot.geminiKey") ?? ""
         memoryWarningObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification,
             object: nil,
@@ -468,7 +468,7 @@ final class AppState: ObservableObject {
         ) { [weak self] _ in
             self?.modelQueue.async {
                 self?.cachedModel = nil
-                print("🧹 [OpenReshoot] released cached reconstruction model after memory warning")
+                print("🧹 [OpenReshot] released cached reconstruction model after memory warning")
             }
         }
     }
@@ -491,7 +491,7 @@ final class AppState: ObservableObject {
     }
 
     func reconstruct(_ image: UIImage, sourceData: Data? = nil) {
-        print("🔧 [OpenReshoot] reconstruct start: \(Int(image.size.width))x\(Int(image.size.height)) @\(image.scale)x")
+        print("🔧 [OpenReshot] reconstruct start: \(Int(image.size.width))x\(Int(image.size.height)) @\(image.scale)x")
         let displayImage = SharpModel.normalized(image)
         inputImage = displayImage
         imageAspect = max(0.1, displayImage.size.width / max(displayImage.size.height, 1))
@@ -517,21 +517,21 @@ final class AppState: ObservableObject {
             guard let self else { return }
             do {
                 let model = try self.loadCachedModel()
-                print("✅ [OpenReshoot] running inference (\(selectedQuality.title))…")
+                print("✅ [OpenReshot] running inference (\(selectedQuality.title))…")
                 let t0 = Date()
                 let out = try model.reconstruct(displayImage, sourceData: sourceData)
-                print("✅ [OpenReshoot] inference done in \(Int(-t0.timeIntervalSinceNow))s, \(out.count) gaussians")
+                print("✅ [OpenReshot] inference done in \(Int(-t0.timeIntervalSinceNow))s, \(out.count) gaussians")
                 let (g, focus) = GaussianCloud.build(from: out, quality: selectedQuality)
-                print("✅ [OpenReshoot] cloud built, focus=\(focus)")
+                print("✅ [OpenReshot] cloud built, focus=\(focus)")
                 DispatchQueue.main.async {
-                    if self.renderer == nil { print("❌ [OpenReshoot] renderer is nil (Metal init failed)") }
+                    if self.renderer == nil { print("❌ [OpenReshot] renderer is nil (Metal init failed)") }
                     self.renderer?.setCloud(g, focus: focus,
                                             fpx: out.fpx, width: out.width, height: out.height)
                     self.hasCloud = true
                     self.status = ""
                 }
             } catch {
-                print("❌ [OpenReshoot] reconstruct error: \(error)")
+                print("❌ [OpenReshot] reconstruct error: \(error)")
                 DispatchQueue.main.async {
                     self.reconstructingScene = false
                     self.processFailed = true
@@ -548,18 +548,18 @@ final class AppState: ObservableObject {
                 guard let self, self.subjectMaskRequestID == requestID else { return }
                 self.subjectProtectionMask = mask
                 print(mask == nil
-                      ? "⚠️ [OpenReshoot] no foreground subject mask"
-                      : "✅ [OpenReshoot] foreground subject mask ready")
+                      ? "⚠️ [OpenReshot] no foreground subject mask"
+                      : "✅ [OpenReshot] foreground subject mask ready")
             }
         }
     }
 
     private func loadCachedModel() throws -> SharpModel {
         if let cachedModel {
-            print("♻️ [OpenReshoot] reusing cached reconstruction model")
+            print("♻️ [OpenReshot] reusing cached reconstruction model")
             return cachedModel
         }
-        print("⏳ [OpenReshoot] loading reconstruction model…")
+        print("⏳ [OpenReshot] loading reconstruction model…")
         let model = try SharpModel(modelURL: modelStore.activeModelURL())
         cachedModel = model
         return model
@@ -568,7 +568,7 @@ final class AppState: ObservableObject {
     func invalidateModelCache() {
         modelQueue.async { [weak self] in
             self?.cachedModel = nil
-            print("🧹 [OpenReshoot] reconstruction model cache invalidated")
+            print("🧹 [OpenReshot] reconstruction model cache invalidated")
         }
     }
 
@@ -598,7 +598,7 @@ final class AppState: ObservableObject {
             return
         }
         capturedFrame = frame
-        print("⏱️ [OpenReshoot] enhance capture+compose \(Self.ms(since: startedAt))ms, frame \(Self.describe(frame))")
+        print("⏱️ [OpenReshot] enhance capture+compose \(Self.ms(since: startedAt))ms, frame \(Self.describe(frame))")
         let key = geminiKey
         Task { [weak self, frame, key] in
             guard let self else { return }
@@ -609,7 +609,7 @@ final class AppState: ObservableObject {
                 saveState = .idle
                 reconstructingFrame = false
             } catch {
-                print("❌ [OpenReshoot] enhance error: \(error)")
+                print("❌ [OpenReshot] enhance error: \(error)")
                 processFailed = true
                 status = ""
                 reconstructingFrame = false
@@ -639,7 +639,7 @@ final class AppState: ObservableObject {
                 }
             } catch {
                 await MainActor.run {
-                    print("❌ [OpenReshoot] save result error: \(error)")
+                    print("❌ [OpenReshot] save result error: \(error)")
                     self?.saveState = .failed
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
                         guard self?.saveState == .failed else { return }
@@ -652,7 +652,7 @@ final class AppState: ObservableObject {
 
     func saveEnhanceSettings(key: String) {
         geminiKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        UserDefaults.standard.set(geminiKey, forKey: "OpenReshoot.geminiKey")
+        UserDefaults.standard.set(geminiKey, forKey: "OpenReshot.geminiKey")
     }
 
     private static func requestGeminiEnhance(imagePNG: Data, key: String) async throws -> UIImage {
@@ -691,9 +691,9 @@ final class AppState: ObservableObject {
             ]
         ]
         let requestData = try JSONSerialization.data(withJSONObject: body)
-        print("⏱️ [OpenReshoot] Gemini upload JSON \(requestData.count / 1024)KB")
+        print("⏱️ [OpenReshot] Gemini upload JSON \(requestData.count / 1024)KB")
         let (data, response) = try await URLSession.shared.upload(for: request, from: requestData)
-        print("⏱️ [OpenReshoot] Gemini response \(ms(since: requestStartedAt))ms, \(data.count / 1024)KB")
+        print("⏱️ [OpenReshot] Gemini response \(ms(since: requestStartedAt))ms, \(data.count / 1024)KB")
         guard let http = response as? HTTPURLResponse else {
             throw err("无效响应")
         }
@@ -715,7 +715,7 @@ final class AppState: ObservableObject {
             guard let payload = input.pngData() else {
                 throw err("Gemini input encode failed")
             }
-            print("⏱️ [OpenReshoot] enhance resize+png \(ms(since: encodeStartedAt))ms, input \(describe(input)), payload \(payload.count / 1024)KB")
+            print("⏱️ [OpenReshot] enhance resize+png \(ms(since: encodeStartedAt))ms, input \(describe(input)), payload \(payload.count / 1024)KB")
             return payload
         }.value
     }
@@ -947,7 +947,7 @@ final class AppState: ObservableObject {
                 return protectionMaskImage(from: observation.pixelBuffer, scale: image.scale)
             }
         } catch {
-            print("⚠️ [OpenReshoot] subject mask failed: \(error)")
+            print("⚠️ [OpenReshot] subject mask failed: \(error)")
             return nil
         }
     }
@@ -978,7 +978,7 @@ private struct FluidPressButtonStyle: ButtonStyle {
     }
 }
 
-private struct OpenReshootGlassCircle: ViewModifier {
+private struct OpenReshotGlassCircle: ViewModifier {
     let tint: Color?
     let interactive: Bool
 
@@ -998,7 +998,7 @@ private struct OpenReshootGlassCircle: ViewModifier {
     }
 }
 
-private struct OpenReshootGlassCapsule: ViewModifier {
+private struct OpenReshotGlassCapsule: ViewModifier {
     let tint: Color?
     let interactive: Bool
 
@@ -1020,15 +1020,15 @@ private struct OpenReshootGlassCapsule: ViewModifier {
 
 private extension View {
     func openReshootGlassCircle(tint: Color? = nil, interactive: Bool = true) -> some View {
-        modifier(OpenReshootGlassCircle(tint: tint, interactive: interactive))
+        modifier(OpenReshotGlassCircle(tint: tint, interactive: interactive))
     }
 
     func openReshootGlassCapsule(tint: Color? = nil, interactive: Bool = true) -> some View {
-        modifier(OpenReshootGlassCapsule(tint: tint, interactive: interactive))
+        modifier(OpenReshotGlassCapsule(tint: tint, interactive: interactive))
     }
 }
 
-private enum OpenReshootPalette {
+private enum OpenReshotPalette {
     static let bg = Color(red: 248.0 / 255.0, green: 245.0 / 255.0, blue: 239.0 / 255.0)
     static let bgElevated = Color.white
     static let bgHover = Color(red: 234.0 / 255.0, green: 229.0 / 255.0, blue: 219.0 / 255.0)
@@ -1087,29 +1087,29 @@ struct ContentView: View {
             if ProcessInfo.processInfo.arguments.contains("-autotest"),
                let url = Bundle.main.url(forResource: "koala", withExtension: "png"),
                let data = try? Data(contentsOf: url), let img = UIImage(data: data) {
-                print("🧪 [OpenReshoot] autotest: reconstructing bundled koala.png")
+                print("🧪 [OpenReshot] autotest: reconstructing bundled koala.png")
                 app.reconstruct(img, sourceData: data)
             }
         }
         .onChange(of: pickerItem) { _, item in
             guard let item else { return }
-            print("📸 [OpenReshoot] photo picked")
+            print("📸 [OpenReshot] photo picked")
             Task {
                 do {
                     guard let data = try await item.loadTransferable(type: Data.self) else {
-                        print("❌ [OpenReshoot] loadTransferable returned nil")
+                        print("❌ [OpenReshot] loadTransferable returned nil")
                         app.processFailed = true
                         return
                     }
-                    print("✅ [OpenReshoot] loaded \(data.count) bytes")
+                    print("✅ [OpenReshot] loaded \(data.count) bytes")
                     guard let img = UIImage(data: data) else {
-                        print("❌ [OpenReshoot] UIImage(data:) failed")
+                        print("❌ [OpenReshot] UIImage(data:) failed")
                         app.processFailed = true
                         return
                     }
                     app.reconstruct(img, sourceData: data)
                 } catch {
-                    print("❌ [OpenReshoot] load error: \(error)")
+                    print("❌ [OpenReshot] load error: \(error)")
                     app.processFailed = true
                 }
             }
@@ -1117,15 +1117,15 @@ struct ContentView: View {
         .sheet(isPresented: $showingSettings) {
             SettingsView(app: app)
         }
-        .tint(OpenReshootPalette.accent)
+        .tint(OpenReshotPalette.accent)
     }
 
     private var appBackdrop: some View {
         LinearGradient(
             colors: [
-                OpenReshootPalette.bgElevated,
-                OpenReshootPalette.bg,
-                OpenReshootPalette.bgHover.opacity(0.72)
+                OpenReshotPalette.bgElevated,
+                OpenReshotPalette.bg,
+                OpenReshotPalette.bgHover.opacity(0.72)
             ],
             startPoint: .top,
             endPoint: .bottom
@@ -1142,22 +1142,22 @@ struct ContentView: View {
             appBackdrop
 
             VStack(spacing: 26) {
-                Text("OpenReshoot")
+                Text("OpenReshot")
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(OpenReshootPalette.textSecondary.opacity(0.74))
+                    .foregroundStyle(OpenReshotPalette.textSecondary.opacity(0.74))
                     .padding(.top, topInset)
 
                 PhotosPicker(selection: $pickerItem, matching: .images) {
                     VStack(spacing: 22) {
                         ZStack {
                             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(OpenReshootPalette.bgElevated.opacity(0.82))
+                                .fill(OpenReshotPalette.bgElevated.opacity(0.82))
 
                             LinearGradient(
                                 colors: [
-                                    OpenReshootPalette.accent.opacity(0.10),
-                                    OpenReshootPalette.coolMist.opacity(0.12),
-                                    OpenReshootPalette.bgElevated.opacity(0.0)
+                                    OpenReshotPalette.accent.opacity(0.10),
+                                    OpenReshotPalette.coolMist.opacity(0.12),
+                                    OpenReshotPalette.bgElevated.opacity(0.0)
                                 ],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
@@ -1167,23 +1167,23 @@ struct ContentView: View {
                             Image(systemName: "photo")
                                 .font(.system(size: 28, weight: .regular))
                                 .symbolRenderingMode(.hierarchical)
-                                .foregroundStyle(OpenReshootPalette.textTertiary.opacity(0.72))
+                                .foregroundStyle(OpenReshotPalette.textTertiary.opacity(0.72))
 
                             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .strokeBorder(OpenReshootPalette.border.opacity(0.82), lineWidth: 1)
+                                .strokeBorder(OpenReshotPalette.border.opacity(0.82), lineWidth: 1)
                         }
                         .frame(width: frameWidth, height: frameHeight)
                         .shadow(color: .black.opacity(0.06), radius: 24, y: 12)
 
                         Label("选择照片", systemImage: "plus")
                             .font(.system(size: 15, weight: .semibold, design: .rounded))
-                            .foregroundStyle(OpenReshootPalette.bg)
+                            .foregroundStyle(OpenReshotPalette.bg)
                             .symbolRenderingMode(.hierarchical)
                             .frame(width: 128, height: 44)
-                            .background(OpenReshootPalette.textPrimary, in: Capsule())
+                            .background(OpenReshotPalette.textPrimary, in: Capsule())
                             .overlay(
                                 Capsule()
-                                    .strokeBorder(OpenReshootPalette.accentMuted.opacity(0.24), lineWidth: 1)
+                                    .strokeBorder(OpenReshotPalette.accentMuted.opacity(0.24), lineWidth: 1)
                             )
                     }
                 }
@@ -1202,7 +1202,7 @@ struct ContentView: View {
                         Image(systemName: "gearshape")
                             .font(.system(size: 18, weight: .medium))
                             .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(OpenReshootPalette.textSecondary.opacity(0.86))
+                            .foregroundStyle(OpenReshotPalette.textSecondary.opacity(0.86))
                             .frame(width: 44, height: 44)
                             .contentShape(Circle())
                             .openReshootGlassCircle()
@@ -1502,7 +1502,7 @@ struct ContentView: View {
             } label: {
                 Label("重构", systemImage: "sparkles")
                     .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundStyle(OpenReshootPalette.accent)
+                    .foregroundStyle(OpenReshotPalette.accent)
                     .symbolRenderingMode(.hierarchical)
                     .frame(width: 102, height: 44)
                     .contentShape(Rectangle())
@@ -1543,7 +1543,7 @@ struct ContentView: View {
         switch app.saveState {
         case .saving:
             ProgressView()
-                .tint(OpenReshootPalette.accent)
+                .tint(OpenReshotPalette.accent)
                 .frame(width: 44, height: 44)
         case .saved:
             plainUtilityIcon(systemName: "checkmark", foreground: Color(red: 0.36, green: 0.56, blue: 0.36))
@@ -1554,7 +1554,7 @@ struct ContentView: View {
         }
     }
 
-    private func plainUtilityIcon(systemName: String, foreground: Color = OpenReshootPalette.textSecondary) -> some View {
+    private func plainUtilityIcon(systemName: String, foreground: Color = OpenReshotPalette.textSecondary) -> some View {
         Image(systemName: systemName)
             .font(.system(size: 19, weight: .medium))
             .symbolRenderingMode(.hierarchical)
@@ -1730,9 +1730,9 @@ struct MetalView: UIViewRepresentable {
         v.contentScaleFactor = app.quality.renderScale(memoryGB: Self.memoryGB)
         if let r = ReshootRenderer(v) {
             app.attachRenderer(r)
-            print("✅ [OpenReshoot] MetalSplatter renderer ready")
+            print("✅ [OpenReshot] MetalSplatter renderer ready")
         } else {
-            print("❌ [OpenReshoot] ReshootRenderer init failed (Metal unavailable)")
+            print("❌ [OpenReshot] ReshootRenderer init failed (Metal unavailable)")
         }
         return v
     }

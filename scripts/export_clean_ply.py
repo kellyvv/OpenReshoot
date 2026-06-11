@@ -1,4 +1,4 @@
-"""Export an OpenReshoot reconstruction .ply as a clean single-element 3DGS .ply.
+"""Export an OpenReshot reconstruction .ply as a clean single-element 3DGS .ply.
 
 The reconstruction .ply carries extra PLY elements (extrinsic / intrinsic / image_size /
 ...). Some web viewers (e.g. antimatter15/splat) parse the header by summing

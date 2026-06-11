@@ -1,6 +1,6 @@
-# Contributing to OpenReshoot
+# Contributing to OpenReshot
 
-OpenReshoot is an iOS-first photo motion app. Contributions should improve the
+OpenReshot is an iOS-first photo motion app. Contributions should improve the
 native app experience, the Core ML conversion path, the Metal renderer, or the
 local comparison prototype.
 
@@ -14,7 +14,7 @@ local comparison prototype.
 
 ## Before Opening a Pull Request
 
-- Keep the user-facing app behavior focused on OpenReshoot.
+- Keep the user-facing app behavior focused on OpenReshot.
 - Do not commit generated models, checkpoints, uploads, derived data, or API keys.
 - Run the relevant build or script checks before submitting.
 - Keep model attribution and model-license requirements intact when touching the

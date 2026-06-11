@@ -1,6 +1,6 @@
-# OpenReshoot iOS
+# OpenReshot iOS
 
-OpenReshoot iOS 是原生 SwiftUI + Core ML + Metal 版本。默认打包为空壳 App，不把 1GB+ 的 SHARP 模型放进安装包；首次使用时在设置里下载模型，下载完成后在设备本机编译并运行。
+OpenReshot iOS 是原生 SwiftUI + Core ML + Metal 版本。默认打包为空壳 App，不把 1GB+ 的 SHARP 模型放进安装包；首次使用时在设置里下载模型，下载完成后在设备本机编译并运行。
 
 ## 要求
 
@@ -16,10 +16,10 @@ OpenReshoot iOS 是原生 SwiftUI + Core ML + Metal 版本。默认打包为空�
 ```bash
 cd ios
 xcodegen generate
-open OpenReshoot.xcodeproj
+open OpenReshot.xcodeproj
 ```
 
-在 Xcode 中选择 `OpenReshoot` target，配置签名 Team，选择真机运行。默认 target 会排除 `OpenReshoot/SHARP.mlpackage`，所以 App 包体积保持轻量。
+在 Xcode 中选择 `OpenReshot` target，配置签名 Team，选择真机运行。默认 target 会排除 `OpenReshot/SHARP.mlpackage`，所以 App 包体积保持轻量。
 
 首次运行流程：
 
@@ -30,7 +30,7 @@ open OpenReshoot.xcodeproj
 
 ## 模型下载
 
-内置下载地址在 `OpenReshootModelDownloadBaseURL`：
+内置下载地址在 `OpenReshotModelDownloadBaseURL`：
 
 ```text
 https://huggingface.co/kellyxiaowei/openreshoot-sharp-coreml/resolve/main/SHARP.mlpackage
@@ -54,7 +54,7 @@ SHARP.mlpackage/
 下载完成后，App 会在本机调用 `MLModel.compileModel(at:)` 编译为 `SHARP.mlmodelc`，并保存到 Application Support：
 
 ```text
-OpenReshoot/Models/SHARP.mlmodelc
+OpenReshot/Models/SHARP.mlmodelc
 ```
 
 后续启动会优先使用已下载模型；没有下载模型时，设置页会显示未安装。
@@ -77,7 +77,7 @@ https://aistudio.google.com/apikey
 
 | file | role |
 |---|---|
-| `OpenReshootApp.swift` | SwiftUI 主界面、设置页、模型下载/安装状态、照片选择、重构流程 |
+| `OpenReshotApp.swift` | SwiftUI 主界面、设置页、模型下载/安装状态、照片选择、重构流程 |
 | `SharpModel.swift` | 加载已下载或 bundle 内的 Core ML 模型，预处理并运行推理 |
 | `GaussianCloud.swift` | NDC 到 metric 坐标转换，构建 3D covariance |
 | `Splat.metal` | EWA splatting shader |
@@ -93,7 +93,7 @@ pip install -r requirements-ios.txt
 scripts/prepare_ios_model.sh
 ```
 
-这个流程会生成 `ios/OpenReshoot/SHARP.mlpackage`。当前默认 `project.yml` 会把它从 target sources 里排除，避免打包进 App；如果你明确要内置模型，需要手动调整 XcodeGen 配置。
+这个流程会生成 `ios/OpenReshot/SHARP.mlpackage`。当前默认 `project.yml` 会把它从 target sources 里排除，避免打包进 App；如果你明确要内置模型，需要手动调整 XcodeGen 配置。
 
 ## 注意事项
 
@@ -101,4 +101,4 @@ scripts/prepare_ios_model.sh
 - SHARP 1536x1536 模型的 ViT activations 很吃内存，低内存设备可能失败或被系统终止。
 - 当前运行时动效定位是固定画框照片视差，不是完整 3DGS 场景查看器。
 - iOS **重构** 步骤会使用用户保存的 Gemini API key 直接请求 Gemini。
-- OpenReshoot 自有源码采用 Apache 2.0；Apple SHARP 上游源码和研究模型分别受根目录 `LICENSE_APPLE_SHARP`、`LICENSE_MODEL` 约束。不要把研究模型当作商业分发资产使用。
+- OpenReshot 自有源码采用 Apache 2.0；Apple SHARP 上游源码和研究模型分别受根目录 `LICENSE_APPLE_SHARP`、`LICENSE_MODEL` 约束。不要把研究模型当作商业分发资产使用。

@@ -1,4 +1,4 @@
-"""OpenReshoot local server: upload a photo -> reconstruct on MPS -> parallax viewer.
+"""OpenReshot local server: upload a photo -> reconstruct on MPS -> parallax viewer.
 
 Serves the viewer at /splat/ and exposes POST /api/predict, which takes raw image
 bytes, runs the reconstruction model, writes a clean single-element .ply + a downscaled photo under

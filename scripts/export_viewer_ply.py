@@ -1,4 +1,4 @@
-"""Re-orient an OpenReshoot reconstruction .ply for standard y-up web viewers.
+"""Re-orient an OpenReshot reconstruction .ply for standard y-up web viewers.
 
 The model exports gaussians in OpenCV camera space (x right, y DOWN, z forward), so
 public viewers (SuperSplat, antimatter15, ...) show them upside-down. This

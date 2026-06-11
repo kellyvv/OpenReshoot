@@ -123,7 +123,7 @@ enum GaussianCloud {
         var zs = stride(from: 0, to: points.count, by: max(1, points.count / 4096)).map { points[$0].position.z }.filter { $0 > 0 }
         zs.sort()
         let focus = zs.isEmpty ? 1.0 : zs[zs.count / 2]
-        print("🎯 [OpenReshoot] \(points.count) splats (\(quality.title), grid \(res)², step \(step), \(n) raw, opacity ≥ \(minOpacity)), focus=\(focus)")
+        print("🎯 [OpenReshot] \(points.count) splats (\(quality.title), grid \(res)², step \(step), \(n) raw, opacity ≥ \(minOpacity)), focus=\(focus)")
         return (points, focus)
     }
 }

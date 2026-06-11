@@ -1,7 +1,7 @@
 [project]
-name = "openreshoot"
+name = "openreshot"
 version = "0.1"
-description = "Native iOS OpenReshoot app with Core ML photo reconstruction tooling."
+description = "Native iOS OpenReshot app with Core ML photo reconstruction tooling."
 readme = "README.md"
 dependencies = [
   "click",
@@ -17,12 +17,12 @@ dependencies = [
 ]
 
 [project.scripts]
-openreshoot-sharp = "sharp.cli:main_cli"
+openreshot-sharp = "sharp.cli:main_cli"
 sharp = "sharp.cli:main_cli"
 
 [project.urls]
-Homepage = "https://github.com/kellyvv/OpenReshoot"
-Repository = "https://github.com/kellyvv/OpenReshoot"
+Homepage = "https://github.com/kellyvv/OpenReshot"
+Repository = "https://github.com/kellyvv/OpenReshot"
 
 [build-system]
 requires = ["setuptools", "setuptools-scm"]
