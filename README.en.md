@@ -22,8 +22,6 @@
     <a href="#latest-updates">Latest Updates</a> ·
     <a href="#quick-start">Quick Start</a> ·
     <a href="#model-download">Model Download</a> ·
-    <a href="#gemini-api-key">Gemini API Key</a> ·
-    <a href="#local-web-prototype">Local Web Prototype</a> ·
     <a href="#license">License</a>
   </p>
 </div>
@@ -39,10 +37,7 @@ After WWDC 2026, spatial photos and angle-aware photo viewing became one of the 
 ## Core Experience
 
 - Reshoot from a new angle: drag the photo and find a better angle or composition.
-- Make still photos move: the photo changes perspective without moving the whole viewer.
 - Generate the final image: when the angle feels right, Reshoot creates a clearer, more complete photo.
-- Native iOS flow: system photo picker, native controls, and system photo library saving.
-- Local photo motion: after downloading the model, photo motion runs on device and does not need a Gemini API key or a PC server.
 
 ## Latest Updates
 
@@ -57,7 +52,7 @@ After WWDC 2026, spatial photos and angle-aware photo viewing became one of the 
 
 ### 2026-06-11
 
-- The iOS flow now matches the PC flow: pick a photo, view motion, reshoot the current angle, and save the result.
+- The iOS flow now covers picking a photo, viewing motion, reshooting the current angle, and saving the result.
 - The iOS app is packaged as a lightweight shell by default and does not bundle the 1GB+ model; first use downloads the Core ML model from Hugging Face in Settings.
 - The viewer includes glow, sheen, cover fade, and colorful missing-area treatment.
 - The bottom controls now use a quieter PhoneClaw-style visual direction and blend directly into the background.
@@ -106,36 +101,11 @@ SHARP.mlpackage/
   Data/com.apple.CoreML/weights/weight.bin
 ```
 
-After download, the app compiles the package locally into `SHARP.mlmodelc`. Photo selection and photo motion then run through on-device Core ML inference. The model is based on the Apple SHARP research model; see [docs/LICENSE_MODEL](docs/LICENSE_MODEL) and the Hugging Face model card for model licensing.
-
-## Gemini API Key
-
-OpenReshot currently uses `gemini-3.1-flash-image` to generate the final Reshoot photo. The app does not include a shared public API key, so users need to enter their own Gemini API key.
-
-Setup:
-
-1. Open [Google AI Studio API Keys](https://aistudio.google.com/apikey), sign in, and create a Gemini API key.
-2. In the iOS app, tap the Settings button.
-3. Paste the API key and save it.
-4. Return to the photo, drag to the angle you want, then tap Reshoot.
-
-The local photo motion experience does not need a Gemini API key. Gemini is only used when the user taps Reshoot to generate the final image. Do not commit your API key to GitHub.
-
-## Local Web Prototype
-
-The repository keeps the Python / MPS web prototype mainly for contributors who want to compare the iOS result with the PC flow. Regular iOS use does not require it.
-
-```bash
-pip install -r requirements/requirements-web.txt
-export GEMINI_API_KEY="your-key"
-bash prototype/run.sh
-```
-
-Then open `http://127.0.0.1:8765/splat/`.
+After download, the app compiles the package locally into `SHARP.mlmodelc`. Photo selection and photo motion then run on device.
 
 ## Contributing
 
-Issues, screenshots, and short reproduction videos are welcome. For iOS viewer, photo motion, Gemini Reshoot, or save-flow bugs, please include the device model, iOS version, and a concise reproduction path.
+Issues, screenshots, and short reproduction videos are welcome.
 
 ## License
 
