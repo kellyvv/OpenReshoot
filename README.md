@@ -109,6 +109,4 @@ SHARP.mlpackage/
 
 ## 许可
 
-OpenReshot 自有源码采用 [Apache License 2.0](LICENSE)，与 PhoneClaw 保持一致。
-
-Apple SHARP 相关上游源码许可见 [docs/LICENSE_APPLE_SHARP](docs/LICENSE_APPLE_SHARP)，模型许可见 [docs/LICENSE_MODEL](docs/LICENSE_MODEL)。上游开源声明见 [docs/ACKNOWLEDGEMENTS](docs/ACKNOWLEDGEMENTS)。
+OpenReshot 自有源码采用 [Apache License 2.0](LICENSE)。

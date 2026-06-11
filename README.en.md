@@ -109,6 +109,4 @@ Issues, screenshots, and short reproduction videos are welcome.
 
 ## License
 
-OpenReshot-owned source code is licensed under the [Apache License 2.0](LICENSE), matching PhoneClaw.
-
-Apple SHARP upstream source licensing is preserved in [docs/LICENSE_APPLE_SHARP](docs/LICENSE_APPLE_SHARP), and the released model license is in [docs/LICENSE_MODEL](docs/LICENSE_MODEL). Also see [docs/ACKNOWLEDGEMENTS](docs/ACKNOWLEDGEMENTS) for upstream open-source notices.
+OpenReshot-owned source code is licensed under the [Apache License 2.0](LICENSE).
