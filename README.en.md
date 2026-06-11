@@ -1,6 +1,4 @@
 <div align="center">
-  <img src="data/teaser.jpg" alt="OpenReshoot preview" width="760">
-
   <h1>OpenReshoot</h1>
 
   <p><strong>Reshoot an ordinary photo from a new angle.</strong></p>

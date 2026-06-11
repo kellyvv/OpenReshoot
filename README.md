@@ -1,6 +1,4 @@
 <div align="center">
-  <img src="data/teaser.jpg" alt="OpenReshoot preview" width="760">
-
   <h1>OpenReshoot</h1>
 
   <p><strong>把一张普通照片，换个角度重新拍出来。</strong></p>
