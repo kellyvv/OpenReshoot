@@ -8,7 +8,7 @@
     <img alt="iOS" src="https://img.shields.io/badge/iOS-18%2B-black">
     <img alt="Core ML" src="https://img.shields.io/badge/Core%20ML-on%20device-0A84FF">
     <img alt="Metal" src="https://img.shields.io/badge/Metal-rendering-8E8E93">
-    <img alt="License" src="https://img.shields.io/badge/License-see%20LICENSE-lightgrey">
+    <img alt="License" src="https://img.shields.io/badge/License-Apache%202.0-green">
   </p>
 
   <p>
@@ -128,4 +128,6 @@ bash run.sh
 
 ## 许可
 
-源码许可见 [LICENSE](LICENSE)，模型许可见 [LICENSE_MODEL](LICENSE_MODEL)。上游开源声明见 [ACKNOWLEDGEMENTS](ACKNOWLEDGEMENTS)。
+OpenReshoot 自有源码采用 [Apache License 2.0](LICENSE)，与 PhoneClaw 保持一致。
+
+Apple SHARP 相关上游源码许可见 [LICENSE_APPLE_SHARP](LICENSE_APPLE_SHARP)，模型许可见 [LICENSE_MODEL](LICENSE_MODEL)。上游开源声明见 [ACKNOWLEDGEMENTS](ACKNOWLEDGEMENTS)。

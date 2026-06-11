@@ -8,7 +8,7 @@
     <img alt="iOS" src="https://img.shields.io/badge/iOS-18%2B-black">
     <img alt="Core ML" src="https://img.shields.io/badge/Core%20ML-on%20device-0A84FF">
     <img alt="Metal" src="https://img.shields.io/badge/Metal-rendering-8E8E93">
-    <img alt="License" src="https://img.shields.io/badge/License-see%20LICENSE-lightgrey">
+    <img alt="License" src="https://img.shields.io/badge/License-Apache%202.0-green">
   </p>
 
   <p>
@@ -128,4 +128,6 @@ Issues, screenshots, and short reproduction videos are welcome. For iOS viewer, 
 
 ## License
 
-See [LICENSE](LICENSE) for the source license and [LICENSE_MODEL](LICENSE_MODEL) for the released model license. Also see [ACKNOWLEDGEMENTS](ACKNOWLEDGEMENTS) for upstream open-source notices.
+OpenReshoot-owned source code is licensed under the [Apache License 2.0](LICENSE), matching PhoneClaw.
+
+Apple SHARP upstream source licensing is preserved in [LICENSE_APPLE_SHARP](LICENSE_APPLE_SHARP), and the released model license is in [LICENSE_MODEL](LICENSE_MODEL). Also see [ACKNOWLEDGEMENTS](ACKNOWLEDGEMENTS) for upstream open-source notices.

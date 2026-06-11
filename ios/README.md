@@ -101,4 +101,4 @@ scripts/prepare_ios_model.sh
 - SHARP 1536x1536 模型的 ViT activations 很吃内存，低内存设备可能失败或被系统终止。
 - 当前运行时动效定位是固定画框照片视差，不是完整 3DGS 场景查看器。
 - iOS **重构** 步骤会使用用户保存的 Gemini API key 直接请求 Gemini。
-- 模型许可见仓库根目录 `LICENSE_MODEL` 和 Hugging Face 模型卡；不要把研究模型当作商业分发资产使用。
+- OpenReshoot 自有源码采用 Apache 2.0；Apple SHARP 上游源码和研究模型分别受根目录 `LICENSE_APPLE_SHARP`、`LICENSE_MODEL` 约束。不要把研究模型当作商业分发资产使用。
