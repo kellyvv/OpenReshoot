@@ -4,6 +4,8 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Reshoot</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -18,10 +20,10 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Pick a photo to turn into a 3D parallax view.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Save the reconstructed photo to your library.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Pick a photo to turn into a 3D parallax view.</string>
 	<key>OpenReshootModelDownloadBaseURL</key>
 	<string>https://huggingface.co/kellyxiaowei/openreshoot-sharp-coreml/resolve/main/SHARP.mlpackage</string>
 	<key>UIApplicationSceneManifest</key>

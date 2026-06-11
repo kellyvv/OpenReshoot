@@ -31,6 +31,7 @@ targets:
     info:
       path: OpenReshoot/Info.plist
       properties:
+        CFBundleDisplayName: Reshoot
         NSPhotoLibraryUsageDescription: "Pick a photo to turn into a 3D parallax view."
         NSPhotoLibraryAddUsageDescription: "Save the reconstructed photo to your library."
         OpenReshootModelDownloadBaseURL: "https://huggingface.co/kellyxiaowei/openreshoot-sharp-coreml/resolve/main/SHARP.mlpackage"
@@ -45,6 +46,7 @@ targets:
         product: SplatIO
     settings:
       base:
+        PRODUCT_NAME: Reshoot
         PRODUCT_BUNDLE_IDENTIFIER: com.openreshoot.app
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"
