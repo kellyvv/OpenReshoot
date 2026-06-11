@@ -48,6 +48,7 @@ targets:
       base:
         PRODUCT_NAME: Reshoot
         PRODUCT_BUNDLE_IDENTIFIER: com.openreshoot.app
+        DEVELOPMENT_TEAM: 2K4BDCCL73
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         # 1536x1536 activations are heavy — ask iOS for the raised memory cap.
