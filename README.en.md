@@ -1,8 +1,6 @@
 <div align="center">
   <img src="data/teaser.jpg" alt="OpenReshoot preview" width="760">
 
-  <video src="https://github.com/user-attachments/assets/57ccefa4-ae91-4185-ba59-5f2f672e9c61" width="760" controls muted playsinline></video>
-
   <h1>OpenReshoot</h1>
 
   <p><strong>Reshoot an ordinary photo from a new angle.</strong></p>
@@ -33,6 +31,10 @@
 </div>
 
 OpenReshoot is a native iOS photo motion app. Pick a photo, drag inside a fixed frame, and the photo feels like it was captured from a different angle. When the view looks right, tap Reshoot to generate the final photo for that angle and save it back to the system photo library.
+
+<div align="center">
+  <video src="https://github.com/user-attachments/assets/57ccefa4-ae91-4185-ba59-5f2f672e9c61" width="760" controls muted playsinline></video>
+</div>
 
 After WWDC 2026, spatial photos and angle-aware photo viewing became one of the most interesting iOS 27-era directions. Many users still cannot try that experience immediately because of system or device limits. OpenReshoot brings the idea of "view it from another angle, then reshoot it from that angle" to more iPhones and iPads.
 

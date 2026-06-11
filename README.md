@@ -1,8 +1,6 @@
 <div align="center">
   <img src="data/teaser.jpg" alt="OpenReshoot preview" width="760">
 
-  <video src="https://github.com/user-attachments/assets/57ccefa4-ae91-4185-ba59-5f2f672e9c61" width="760" controls muted playsinline></video>
-
   <h1>OpenReshoot</h1>
 
   <p><strong>把一张普通照片，换个角度重新拍出来。</strong></p>
@@ -33,6 +31,10 @@
 </div>
 
 OpenReshoot 是一个原生 iOS 照片动效应用。选择一张照片后，你可以在固定画框里轻轻拖动视角，让照片像是从另一个角度被重新拍摄；满意后点击重构，生成当前视角的最终照片，并保存回系统相册。
+
+<div align="center">
+  <video src="https://github.com/user-attachments/assets/57ccefa4-ae91-4185-ba59-5f2f672e9c61" width="760" controls muted playsinline></video>
+</div>
 
 WWDC 2026 之后，空间照片和可变视角照片成为 iOS 27 时代很有吸引力的新体验。但很多用户会因为系统版本或设备限制暂时用不上。OpenReshoot 想做的就是把这种“普通照片也能换角度看、换角度拍”的体验，带给更多 iPhone 和 iPad。
 
