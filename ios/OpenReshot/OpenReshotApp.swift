@@ -91,6 +91,8 @@ final class AppState: ObservableObject {
     @Published var sheenTiltX: CGFloat = 0
     @Published var sheenTiltY: CGFloat = 0
     @Published var motionTilt = SIMD2<Float>(0, 0)
+    @Published var previewMode = false
+    @Published var loadingPreviewScene = false
     @Published var reconstructingScene = false
     @Published var reconstructingFrame = false
     @Published var processFailed = false
@@ -116,10 +118,10 @@ final class AppState: ObservableObject {
     private static let geminiInputMaxSide: CGFloat = 1024
     private static let geminiModel = "gemini-3.1-flash-image"
     private static let demoSceneResource = "DemoFLOW"
-    private static let demoSceneFocalPixels: Float = 1255.01
-    private static let demoSceneFocus: Float = 13.241617
-    private static let demoSceneWidth = 1086
-    private static let demoSceneHeight = 1448
+    private static let demoSceneFocalPixels: Float = 1330.3168
+    private static let demoSceneFocus: Float = 27.689307
+    private static let demoSceneWidth = 941
+    private static let demoSceneHeight = 1672
     private static var memoryGB: UInt64 { ProcessInfo.processInfo.physicalMemory / 1_073_741_824 }
     private static let enhancePrompt = """
     This image is a novel-view render produced from a 3D Gaussian Splatting reconstruction. Because the camera viewpoint changed, some newly exposed edges, disoccluded regions, stretched areas, warped details, holes, and blurry splat artifacts may appear.
@@ -157,6 +159,7 @@ final class AppState: ObservableObject {
         renderer.onReady = { [weak self] in
             guard let self, self.inputImage != nil else { return }
             self.rendererReady = true
+            self.loadingPreviewScene = false
             self.reconstructingScene = false
             self.processFailed = false
             self.processFailureKind = nil
@@ -185,7 +188,7 @@ final class AppState: ObservableObject {
         enhanceTask?.cancel()
         enhanceTask = nil
         renderer?.clearCloud()
-        currentSourceData = data
+        currentSourceData = nil
         inputImage = image
         imageAspect = max(0.1, CGFloat(Self.demoSceneWidth) / CGFloat(Self.demoSceneHeight))
         hasCloud = false
@@ -194,7 +197,9 @@ final class AppState: ObservableObject {
         sheenTiltX = 0
         sheenTiltY = 0
         motionTilt = .zero
-        reconstructingScene = true
+        previewMode = true
+        loadingPreviewScene = true
+        reconstructingScene = false
         reconstructingFrame = false
         processFailed = false
         processFailureKind = nil
@@ -251,6 +256,9 @@ final class AppState: ObservableObject {
         enhanceTask?.cancel()
         enhanceTask = nil
         renderer?.clearCloud()
+        previewMode = false
+        loadingPreviewScene = false
+        demoScenePending = false
         inputImage = displayImage
         imageAspect = max(0.1, displayImage.size.width / max(displayImage.size.height, 1))
         hasCloud = false
@@ -343,6 +351,7 @@ final class AppState: ObservableObject {
     @MainActor
     func modelInstallationDidFinish() {
         invalidateModelCache()
+        guard !previewMode else { return }
         guard processFailed,
               processFailureKind == .missingModel || processFailureKind == .reconstruction,
               let inputImage else { return }
@@ -351,6 +360,7 @@ final class AppState: ObservableObject {
 
     @MainActor
     func retryCurrentReconstruction() {
+        guard !previewMode else { return }
         guard let inputImage else { return }
         reconstruct(inputImage, sourceData: currentSourceData)
     }
@@ -365,6 +375,7 @@ final class AppState: ObservableObject {
 
     @MainActor
     func reconstructCurrentFrame() {
+        guard !previewMode else { return }
         guard rendererReady, !reconstructingFrame else { return }
         guard !geminiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             processFailed = true
@@ -451,6 +462,8 @@ final class AppState: ObservableObject {
         enhanceTask = nil
         renderer?.clearCloud()
         demoScenePending = false
+        previewMode = false
+        loadingPreviewScene = false
         status = ""
         hasCloud = false
         rendererReady = false
@@ -478,6 +491,8 @@ final class AppState: ObservableObject {
         guard demoScenePending, let renderer else { return }
         guard let sceneURL = Bundle.main.url(forResource: Self.demoSceneResource, withExtension: "ply") else {
             demoScenePending = false
+            previewMode = false
+            loadingPreviewScene = false
             reconstructingScene = false
             processFailed = true
             processFailureKind = .imageLoad
@@ -486,6 +501,7 @@ final class AppState: ObservableObject {
         }
 
         demoScenePending = false
+        loadingPreviewScene = true
         renderer.setCloud(from: sceneURL,
                           focus: Self.demoSceneFocus,
                           fpx: Self.demoSceneFocalPixels,
@@ -958,6 +974,8 @@ private struct EmptyHomeDot {
 }
 
 private enum ReshotFlowPhase {
+    case previewLoading
+    case preview
     case inferring
     case failed
     case compose
@@ -1331,6 +1349,8 @@ struct ContentView: View {
         if app.resultImage != nil { return .result }
         if app.reconstructingFrame { return .generating }
         if app.processFailed { return .failed }
+        if app.loadingPreviewScene { return .previewLoading }
+        if app.previewMode { return .preview }
         if app.reconstructingScene || !app.rendererReady { return .inferring }
         return .compose
     }
@@ -1403,6 +1423,14 @@ struct ContentView: View {
     private func flowBottomAction(phase: ReshotFlowPhase, scale: CGFloat) -> some View {
         if phase == .result {
             resultActionRow(scale: scale)
+        } else if phase == .preview {
+            Button {
+                openPhotoPickerForReplacement()
+            } label: {
+                emptyBottomAction(scale: scale)
+            }
+            .buttonStyle(FluidPressButtonStyle(pressedScale: 0.94))
+            .accessibilityLabel("放入照片")
         } else if phase == .failed {
             failedActionRow(scale: scale)
         } else if phase == .compose {
@@ -1675,7 +1703,7 @@ struct ContentView: View {
     }
 
     private func revealShutterMenuAfterReconstruction() {
-        guard app.inputImage != nil, app.rendererReady, app.resultImage == nil, !app.reconstructingFrame else { return }
+        guard !app.previewMode, app.inputImage != nil, app.rendererReady, app.resultImage == nil, !app.reconstructingFrame else { return }
         frameStartPending = false
         withAnimation(.spring(response: 0.46, dampingFraction: 0.70, blendDuration: 0.06)) {
             shutterMenuExpanded = true
@@ -1696,6 +1724,7 @@ struct ContentView: View {
     }
 
     private func collapseShutterMenuThenReconstruct() {
+        guard !app.previewMode else { return }
         guard !frameStartPending else { return }
         frameStartPending = true
         generationStartedAt = Date()
@@ -1837,7 +1866,7 @@ struct ContentView: View {
 
     private func flowCaption(for phase: ReshotFlowPhase) -> String? {
         switch phase {
-        case .inferring, .generating:
+        case .previewLoading, .preview, .inferring, .generating:
             return nil
         case .failed:
             return failedCaption
@@ -1850,6 +1879,10 @@ struct ContentView: View {
 
     private func flowRingLabel(for phase: ReshotFlowPhase) -> String {
         switch phase {
+        case .previewLoading:
+            return "载入预览"
+        case .preview:
+            return ""
         case .inferring:
             return "构建空间"
         case .failed:
@@ -1866,7 +1899,7 @@ struct ContentView: View {
     private func flowRingButton(phase: ReshotFlowPhase, scale: CGFloat) -> some View {
         TimelineView(.animation) { timeline in
             let rotationSpeed = phase == .generating ? 0.95 : 1.1
-            let rotation = (phase == .inferring || phase == .generating)
+            let rotation = (phase == .previewLoading || phase == .inferring || phase == .generating)
                 ? timeline.date.timeIntervalSinceReferenceDate / rotationSpeed * 360
                 : 0
 
