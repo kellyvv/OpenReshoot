@@ -22,6 +22,6 @@ body:
     id: checklist
     attributes:
       label: Setup checklist
-      description: Paste the output from `scripts/check_openreshoot_setup.sh`.
+      description: Paste the output from `scripts/check_openreshot_setup.sh`.
     validations:
       required: false

@@ -71,359 +71,12 @@ enum SaveState {
     case failed
 }
 
-enum ReconstructionModelInstallState: Equatable, Sendable {
-    case notInstalled
-    case checkingSource
-    case downloading
-    case downloaded
-    case bundled
-    case failed(String)
-}
-
-struct ReconstructionDownloadProgress: Equatable, Sendable {
-    var bytesReceived: Int64 = 0
-    var totalBytes: Int64?
-    var bytesPerSecond: Double?
-
-    var fractionCompleted: Double? {
-        guard let totalBytes, totalBytes > 0 else { return nil }
-        return min(1, max(0, Double(bytesReceived) / Double(totalBytes)))
-    }
-}
-
-private enum ReconstructionModelDownloadError: LocalizedError {
-    case invalidURL
-    case invalidResponse
-    case httpStatus(Int)
-    case unsupportedFormat(String)
-
-    var errorDescription: String? {
-        switch self {
-        case .invalidURL:
-            return "模型下载 URL 无效"
-        case .invalidResponse:
-            return "下载源响应无效"
-        case .httpStatus(let code):
-            return "模型下载失败，HTTP \(code)"
-        case .unsupportedFormat(let format):
-            return "当前下载器只支持 Hugging Face 上的未压缩 .mlpackage 源文件，当前格式是 \(format)。"
-        }
-    }
-}
-
-/// PhoneClaw-style model installer state, scoped to OpenReshot's single Core ML asset.
-final class ReconstructionModelStore: ObservableObject {
-    @Published private(set) var installState: ReconstructionModelInstallState = .notInstalled
-    @Published private(set) var progress = ReconstructionDownloadProgress()
-
-    private var downloadTask: Task<Void, Never>?
-
-    init() {
-        refreshInstallState()
-    }
-
-    var isDownloading: Bool {
-        if case .downloading = installState { return true }
-        if case .checkingSource = installState { return true }
-        return false
-    }
-
-    var activeModelLabel: String {
-        switch installState {
-        case .downloaded:
-            return "已下载"
-        case .bundled:
-            return "内置"
-        case .downloading:
-            return "下载中"
-        case .checkingSource:
-            return "检查中"
-        case .failed:
-            return hasDownloadedModel ? "已下载" : (Self.bundledModelURL == nil ? "未安装" : "内置")
-        case .notInstalled:
-            return "未安装"
-        }
-    }
-
-    var hasDownloadedModel: Bool {
-        FileManager.default.fileExists(atPath: Self.downloadedModelURL.path)
-    }
-
-    func activeModelURL() -> URL? {
-        Self.activeModelURL()
-    }
-
-    func refreshInstallState() {
-        if hasDownloadedModel {
-            installState = .downloaded
-        } else if Self.bundledModelURL != nil {
-            installState = .bundled
-        } else {
-            installState = .notInstalled
-        }
-    }
-
-    func installModel(onInstalled: @escaping () -> Void = {}) {
-        guard !isDownloading else { return }
-
-        installState = .checkingSource
-        progress = ReconstructionDownloadProgress()
-        downloadTask = Task { [weak self] in
-            guard let store = self else { return }
-            do {
-                if Self.builtInDownloadBaseURL != nil {
-                    try await Self.downloadAndInstallPackage { progress in
-                        await store.updateDownloadProgress(progress)
-                    }
-                } else {
-                    try Self.installBundledModel()
-                }
-                await store.finishInstall(onInstalled: onInstalled)
-            } catch is CancellationError {
-                await store.finishCancellation()
-            } catch {
-                await store.finishFailure(error)
-            }
-        }
-    }
-
-    @MainActor
-    private func updateDownloadProgress(_ nextProgress: ReconstructionDownloadProgress) {
-        progress = nextProgress
-        installState = .downloading
-    }
-
-    @MainActor
-    private func finishInstall(onInstalled: () -> Void) {
-        progress = ReconstructionDownloadProgress(
-            bytesReceived: progress.bytesReceived,
-            totalBytes: progress.totalBytes,
-            bytesPerSecond: progress.bytesPerSecond
-        )
-        installState = .downloaded
-        downloadTask = nil
-        onInstalled()
-    }
-
-    @MainActor
-    private func finishCancellation() {
-        downloadTask = nil
-        refreshInstallState()
-    }
-
-    @MainActor
-    private func finishFailure(_ error: Error) {
-        downloadTask = nil
-        installState = .failed(error.localizedDescription)
-    }
-
-    func cancelDownload() {
-        downloadTask?.cancel()
-        downloadTask = nil
-        refreshInstallState()
-    }
-
-    func removeDownloadedModel(onRemoved: @escaping () -> Void = {}) {
-        cancelDownload()
-        do {
-            if FileManager.default.fileExists(atPath: Self.downloadedModelURL.path) {
-                try FileManager.default.removeItem(at: Self.downloadedModelURL)
-            }
-            if FileManager.default.fileExists(atPath: Self.downloadedRawModelURL.path) {
-                try FileManager.default.removeItem(at: Self.downloadedRawModelURL)
-            }
-            onRemoved()
-            refreshInstallState()
-        } catch {
-            installState = .failed(error.localizedDescription)
-        }
-    }
-
-    static func activeModelURL() -> URL? {
-        if FileManager.default.fileExists(atPath: downloadedModelURL.path) {
-            return downloadedModelURL
-        }
-        return bundledModelURL
-    }
-
-    static var bundledModelURL: URL? {
-        Bundle.main.url(forResource: "SHARP", withExtension: "mlmodelc")
-    }
-
-    private static let packageFileSpecs: [(relativePath: String, expectedBytes: Int64)] = [
-        ("Manifest.json", 617),
-        ("Data/com.apple.CoreML/model.mlmodel", 1_019_167),
-        ("Data/com.apple.CoreML/weights/weight.bin", 1_322_157_376),
-    ]
-
-    private static var builtInDownloadBaseURL: URL? {
-        guard let value = Bundle.main.object(forInfoDictionaryKey: "OpenReshotModelDownloadBaseURL") as? String else {
-            return nil
-        }
-        let trimmed = value
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        return trimmed.isEmpty ? nil : URL(string: trimmed + "/")
-    }
-
-    static var downloadedModelURL: URL {
-        modelsDirectory.appendingPathComponent("SHARP.mlmodelc", isDirectory: true)
-    }
-
-    private static var downloadedRawModelURL: URL {
-        modelsDirectory.appendingPathComponent("SHARP-source-model", isDirectory: false)
-    }
-
-    private static var modelsDirectory: URL {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return support
-            .appendingPathComponent("OpenReshot", isDirectory: true)
-            .appendingPathComponent("Models", isDirectory: true)
-    }
-
-    private static func installBundledModel() throws {
-        guard let bundledModelURL else {
-            throw ReconstructionModelDownloadError.invalidURL
-        }
-        let fileManager = FileManager.default
-        try fileManager.createDirectory(at: modelsDirectory, withIntermediateDirectories: true)
-        let stagingURL = modelsDirectory.appendingPathComponent("SHARP.mlmodelc.installing-\(UUID().uuidString)", isDirectory: true)
-        try? fileManager.removeItem(at: stagingURL)
-        try fileManager.copyItem(at: bundledModelURL, to: stagingURL)
-        try? fileManager.removeItem(at: downloadedModelURL)
-        try fileManager.moveItem(at: stagingURL, to: downloadedModelURL)
-    }
-
-    private static func downloadAndInstallPackage(
-        progress: @escaping (ReconstructionDownloadProgress) async -> Void
-    ) async throws {
-        guard let baseURL = builtInDownloadBaseURL,
-              let scheme = baseURL.scheme?.lowercased(),
-              ["http", "https"].contains(scheme) else {
-            throw ReconstructionModelDownloadError.invalidURL
-        }
-
-        let fileManager = FileManager.default
-        let tempDirectory = fileManager.temporaryDirectory
-            .appendingPathComponent("OpenReshotModel-\(UUID().uuidString)", isDirectory: true)
-        try fileManager.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
-        defer { try? fileManager.removeItem(at: tempDirectory) }
-
-        let packageURL = tempDirectory.appendingPathComponent("SHARP.mlpackage", isDirectory: true)
-        try fileManager.createDirectory(at: packageURL, withIntermediateDirectories: true)
-
-        let startedAt = Date()
-        let totalExpectedBytes = packageFileSpecs.reduce(Int64(0)) { $0 + $1.expectedBytes }
-        var completedBytes: Int64 = 0
-
-        for spec in packageFileSpecs {
-            guard let sourceURL = URL(string: spec.relativePath, relativeTo: baseURL)?.absoluteURL else {
-                throw ReconstructionModelDownloadError.invalidURL
-            }
-            let destinationURL = packageURL.appendingPathComponent(spec.relativePath, isDirectory: false)
-            let baseCompletedBytes = completedBytes
-            try await downloadFile(from: sourceURL, to: destinationURL) { fileBytes in
-                let receivedBytes = baseCompletedBytes + fileBytes
-                await progress(ReconstructionDownloadProgress(
-                    bytesReceived: min(receivedBytes, totalExpectedBytes),
-                    totalBytes: totalExpectedBytes,
-                    bytesPerSecond: Double(receivedBytes) / max(Date().timeIntervalSince(startedAt), 0.1)
-                ))
-            }
-            completedBytes += spec.expectedBytes
-            await progress(ReconstructionDownloadProgress(
-                bytesReceived: min(completedBytes, totalExpectedBytes),
-                totalBytes: totalExpectedBytes,
-                bytesPerSecond: Double(completedBytes) / max(Date().timeIntervalSince(startedAt), 0.1)
-            ))
-        }
-
-        let compiledURL = try await MLModel.compileModel(at: packageURL)
-        try fileManager.createDirectory(at: modelsDirectory, withIntermediateDirectories: true)
-
-        let stagingURL = modelsDirectory.appendingPathComponent("SHARP.mlmodelc.installing-\(UUID().uuidString)", isDirectory: true)
-        try? fileManager.removeItem(at: stagingURL)
-        try fileManager.moveItem(at: compiledURL, to: stagingURL)
-        try? fileManager.removeItem(at: downloadedModelURL)
-        try? fileManager.removeItem(at: downloadedRawModelURL)
-        try fileManager.moveItem(at: stagingURL, to: downloadedModelURL)
-    }
-
-    private static func downloadFile(
-        from sourceURL: URL,
-        to destinationURL: URL,
-        progress: @escaping (Int64) async -> Void
-    ) async throws {
-        let delegate = ModelPackageFileDownloader(destinationURL: destinationURL, progress: progress)
-        let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
-        defer { session.invalidateAndCancel() }
-
-        var request = URLRequest(url: sourceURL, timeoutInterval: 60)
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-
-        try await withCheckedThrowingContinuation { continuation in
-            delegate.continuation = continuation
-            session.downloadTask(with: request).resume()
-        }
-    }
-}
-
-private final class ModelPackageFileDownloader: NSObject, URLSessionDownloadDelegate {
-    let destinationURL: URL
-    let progress: (Int64) async -> Void
-    var continuation: CheckedContinuation<Void, Error>?
-    private var didComplete = false
-
-    init(destinationURL: URL, progress: @escaping (Int64) async -> Void) {
-        self.destinationURL = destinationURL
-        self.progress = progress
-    }
-
-    func urlSession(_ session: URLSession,
-                    downloadTask: URLSessionDownloadTask,
-                    didWriteData bytesWritten: Int64,
-                    totalBytesWritten: Int64,
-                    totalBytesExpectedToWrite: Int64) {
-        Task {
-            await progress(totalBytesWritten)
-        }
-    }
-
-    func urlSession(_ session: URLSession,
-                    downloadTask: URLSessionDownloadTask,
-                    didFinishDownloadingTo location: URL) {
-        do {
-            guard let response = downloadTask.response as? HTTPURLResponse else {
-                throw ReconstructionModelDownloadError.invalidResponse
-            }
-            guard (200..<300).contains(response.statusCode) else {
-                throw ReconstructionModelDownloadError.httpStatus(response.statusCode)
-            }
-
-            let fileManager = FileManager.default
-            try fileManager.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try? fileManager.removeItem(at: destinationURL)
-            try fileManager.moveItem(at: location, to: destinationURL)
-            complete(.success(()))
-        } catch {
-            complete(.failure(error))
-        }
-    }
-
-    func urlSession(_ session: URLSession,
-                    task: URLSessionTask,
-                    didCompleteWithError error: Error?) {
-        if let error {
-            complete(.failure(error))
-        }
-    }
-
-    private func complete(_ result: Result<Void, Error>) {
-        guard !didComplete else { return }
-        didComplete = true
-        continuation?.resume(with: result)
-        continuation = nil
-    }
+enum ProcessFailureKind: Equatable {
+    case imageLoad
+    case missingModel
+    case reconstruction
+    case missingAPIKey
+    case enhancement
 }
 
 /// Holds the model + renderer and drives reconstruction off the main thread.
@@ -441,6 +94,7 @@ final class AppState: ObservableObject {
     @Published var reconstructingScene = false
     @Published var reconstructingFrame = false
     @Published var processFailed = false
+    @Published var processFailureKind: ProcessFailureKind?
     @Published var capturedFrame: UIImage?
     @Published var resultImage: UIImage?
     @Published var saveState: SaveState = .idle
@@ -450,13 +104,23 @@ final class AppState: ObservableObject {
     var renderer: ReshootRenderer?
     private let modelQueue = DispatchQueue(label: "OpenReshot.model", qos: .userInitiated)
     private var cachedModel: SharpModel?
+    private var currentSourceData: Data?
     private var memoryWarningObserver: NSObjectProtocol?
+    private var activeTaskID = UUID()
     private var subjectMaskRequestID = UUID()
+    private var reconstructionRequestID = UUID()
+    private var enhanceTask: Task<Void, Never>?
     private static let geminiInputMaxSide: CGFloat = 1024
     private static let geminiModel = "gemini-3.1-flash-image"
     private static var memoryGB: UInt64 { ProcessInfo.processInfo.physicalMemory / 1_073_741_824 }
     private static let enhancePrompt = """
-    This is a novel-view render of a photo: some edges, subject details, and disoccluded areas may be blurry, warped, or missing. Restore only those rendering artifacts with realistic detail that is consistent with the original image. Preserve every person exactly as shown: keep the same identity, age, face, body, skin, hair, clothing, pose, expression, framing, and composition. Do not beautify, sexualize, age-change, body-change, or create any new person. Output one single complete clear photo. 修复画面中的模糊、扭曲和缺失细节，但人物必须保持原样。
+    This image is a novel-view render produced from a 3D Gaussian Splatting reconstruction. Because the camera viewpoint changed, some newly exposed edges, disoccluded regions, stretched areas, warped details, holes, and blurry splat artifacts may appear.
+
+    Repair only those rendering artifacts. Fill missing or extended areas with realistic detail consistent with the surrounding scene and the original photo. Keep the original subject, layout, camera framing, lighting, colors, materials, and composition unchanged. Do not restyle, beautify, replace, or add new main objects.
+
+    If people are visible, preserve them exactly as shown: same identity, appearance, hair, clothing, pose, expression, and framing. Do not alter people or create any new person.
+
+    Output one single complete clear photo. 这是 3DGS 新视角渲染结果，只修复模糊、拉伸、露底、空洞和缺失区域；如果画面里有人，人物必须保持原样。
     """
 
     init() {
@@ -483,16 +147,58 @@ final class AppState: ObservableObject {
     func attachRenderer(_ renderer: ReshootRenderer) {
         self.renderer = renderer
         renderer.onReady = { [weak self] in
-            self?.rendererReady = true
-            self?.reconstructingScene = false
-            self?.processFailed = false
-            self?.status = ""
+            guard let self, self.inputImage != nil else { return }
+            self.rendererReady = true
+            self.reconstructingScene = false
+            self.processFailed = false
+            self.processFailureKind = nil
+            self.status = ""
         }
     }
 
-    func reconstruct(_ image: UIImage, sourceData: Data? = nil) {
+    @MainActor
+    func beginImageLoadTask() -> UUID {
+        let taskID = UUID()
+        resetTaskState(taskID: taskID, clearImage: true)
+        return taskID
+    }
+
+    @MainActor
+    func cancelCurrentTaskAndClear() {
+        resetTaskState(taskID: UUID(), clearImage: true)
+    }
+
+    @MainActor
+    func isCurrentTask(_ taskID: UUID) -> Bool {
+        activeTaskID == taskID
+    }
+
+    @MainActor
+    func failTaskIfCurrent(_ taskID: UUID, kind: ProcessFailureKind = .imageLoad) {
+        guard isCurrentTask(taskID) else { return }
+        reconstructingScene = false
+        reconstructingFrame = false
+        processFailed = true
+        processFailureKind = kind
+        status = ""
+    }
+
+    @MainActor
+    func reconstruct(_ image: UIImage, sourceData: Data? = nil, taskID: UUID? = nil) {
+        if let taskID, !isCurrentTask(taskID) {
+            print("↩️ [OpenReshot] ignored stale picked photo")
+            return
+        }
         print("🔧 [OpenReshot] reconstruct start: \(Int(image.size.width))x\(Int(image.size.height)) @\(image.scale)x")
         let displayImage = SharpModel.normalized(image)
+        let requestID = taskID ?? UUID()
+        let hasInstalledModel = modelStore.activeModelURL() != nil
+        activeTaskID = requestID
+        reconstructionRequestID = requestID
+        currentSourceData = sourceData
+        enhanceTask?.cancel()
+        enhanceTask = nil
+        renderer?.clearCloud()
         inputImage = displayImage
         imageAspect = max(0.1, displayImage.size.width / max(displayImage.size.height, 1))
         hasCloud = false
@@ -501,17 +207,21 @@ final class AppState: ObservableObject {
         sheenTiltX = 0
         sheenTiltY = 0
         motionTilt = .zero
-        reconstructingScene = true
+        reconstructingScene = hasInstalledModel
         reconstructingFrame = false
-        processFailed = false
+        processFailed = !hasInstalledModel
+        processFailureKind = hasInstalledModel ? nil : .missingModel
         capturedFrame = nil
         resultImage = nil
         saveState = .idle
         subjectProtectionMask = nil
         status = ""
-        let maskRequestID = UUID()
-        subjectMaskRequestID = maskRequestID
-        updateSubjectProtectionMask(for: displayImage, requestID: maskRequestID)
+        subjectMaskRequestID = requestID
+        updateSubjectProtectionMask(for: displayImage, requestID: requestID)
+        guard hasInstalledModel else {
+            print("⚠️ [OpenReshot] reconstruction model missing; prompting download")
+            return
+        }
         let selectedQuality = quality
         modelQueue.async { [weak self] in
             guard let self else { return }
@@ -524,6 +234,10 @@ final class AppState: ObservableObject {
                 let (g, focus) = GaussianCloud.build(from: out, quality: selectedQuality)
                 print("✅ [OpenReshot] cloud built, focus=\(focus)")
                 DispatchQueue.main.async {
+                    guard self.activeTaskID == requestID, self.reconstructionRequestID == requestID else {
+                        print("↩️ [OpenReshot] ignored stale reconstruction result")
+                        return
+                    }
                     if self.renderer == nil { print("❌ [OpenReshot] renderer is nil (Metal init failed)") }
                     self.renderer?.setCloud(g, focus: focus,
                                             fpx: out.fpx, width: out.width, height: out.height)
@@ -533,8 +247,10 @@ final class AppState: ObservableObject {
             } catch {
                 print("❌ [OpenReshot] reconstruct error: \(error)")
                 DispatchQueue.main.async {
+                    guard self.activeTaskID == requestID, self.reconstructionRequestID == requestID else { return }
                     self.reconstructingScene = false
                     self.processFailed = true
+                    self.processFailureKind = .reconstruction
                     self.status = ""
                 }
             }
@@ -545,7 +261,7 @@ final class AppState: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let mask = Self.makeSubjectProtectionMask(from: image)
             DispatchQueue.main.async { [weak self] in
-                guard let self, self.subjectMaskRequestID == requestID else { return }
+                guard let self, self.activeTaskID == requestID, self.subjectMaskRequestID == requestID else { return }
                 self.subjectProtectionMask = mask
                 print(mask == nil
                       ? "⚠️ [OpenReshot] no foreground subject mask"
@@ -573,6 +289,21 @@ final class AppState: ObservableObject {
     }
 
     @MainActor
+    func modelInstallationDidFinish() {
+        invalidateModelCache()
+        guard processFailed,
+              processFailureKind == .missingModel || processFailureKind == .reconstruction,
+              let inputImage else { return }
+        reconstruct(inputImage, sourceData: currentSourceData)
+    }
+
+    @MainActor
+    func retryCurrentReconstruction() {
+        guard let inputImage else { return }
+        reconstruct(inputImage, sourceData: currentSourceData)
+    }
+
+    @MainActor
     func updateSheen(for tilt: SIMD2<Float>) {
         motionTilt = tilt
         sheenAmount = min(1, CGFloat(simd_length(tilt)))
@@ -583,36 +314,67 @@ final class AppState: ObservableObject {
     @MainActor
     func reconstructCurrentFrame() {
         guard rendererReady, !reconstructingFrame else { return }
+        guard !geminiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            processFailed = true
+            processFailureKind = .missingAPIKey
+            reconstructingFrame = false
+            status = ""
+            print("⚠️ [OpenReshot] Gemini API key missing; prompting input")
+            return
+        }
+        let taskID = activeTaskID
         let startedAt = Date()
+        enhanceTask?.cancel()
         resultImage = nil
         saveState = .idle
         reconstructingFrame = true
         processFailed = false
+        processFailureKind = nil
         status = ""
         let rendered = renderer?.snapshotImage()
         guard let frame = Self.composeEnhanceFrame(rendered: rendered, source: inputImage),
               frame.size.width > 0,
               frame.size.height > 0 else {
             processFailed = true
+            processFailureKind = .enhancement
             reconstructingFrame = false
             return
         }
         capturedFrame = frame
         print("⏱️ [OpenReshot] enhance capture+compose \(Self.ms(since: startedAt))ms, frame \(Self.describe(frame))")
         let key = geminiKey
-        Task { [weak self, frame, key] in
+        enhanceTask = Task { [weak self, frame, key, taskID] in
             guard let self else { return }
             do {
                 let payload = try await Self.makeGeminiPayload(from: frame)
+                try Task.checkCancellation()
                 let result = try await Self.requestGeminiEnhance(imagePNG: payload, key: key)
-                resultImage = result
-                saveState = .idle
-                reconstructingFrame = false
+                try Task.checkCancellation()
+                await MainActor.run {
+                    guard self.activeTaskID == taskID else { return }
+                    self.resultImage = result
+                    self.saveState = .idle
+                    self.processFailed = false
+                    self.processFailureKind = nil
+                    self.reconstructingFrame = false
+                    self.enhanceTask = nil
+                }
+            } catch is CancellationError {
+                await MainActor.run {
+                    guard self.activeTaskID == taskID else { return }
+                    self.reconstructingFrame = false
+                    self.enhanceTask = nil
+                }
             } catch {
                 print("❌ [OpenReshot] enhance error: \(error)")
-                processFailed = true
-                status = ""
-                reconstructingFrame = false
+                await MainActor.run {
+                    guard self.activeTaskID == taskID else { return }
+                    self.processFailed = true
+                    self.processFailureKind = .enhancement
+                    self.status = ""
+                    self.reconstructingFrame = false
+                    self.enhanceTask = nil
+                }
             }
         }
     }
@@ -624,25 +386,63 @@ final class AppState: ObservableObject {
     }
 
     @MainActor
+    func resetSession() {
+        cancelCurrentTaskAndClear()
+    }
+
+    @MainActor
+    private func resetTaskState(taskID: UUID, clearImage: Bool) {
+        activeTaskID = taskID
+        reconstructionRequestID = taskID
+        subjectMaskRequestID = taskID
+        enhanceTask?.cancel()
+        enhanceTask = nil
+        renderer?.clearCloud()
+        status = ""
+        hasCloud = false
+        rendererReady = false
+        if clearImage {
+            inputImage = nil
+            imageAspect = 1
+            currentSourceData = nil
+        }
+        sheenAmount = 0
+        sheenTiltX = 0
+        sheenTiltY = 0
+        motionTilt = .zero
+        reconstructingScene = false
+        reconstructingFrame = false
+        processFailed = false
+        processFailureKind = nil
+        capturedFrame = nil
+        resultImage = nil
+        saveState = .idle
+        subjectProtectionMask = nil
+    }
+
+    @MainActor
     func saveResultImage() {
         guard let resultImage, saveState != .saving else { return }
+        let taskID = activeTaskID
         saveState = .saving
-        Task { [weak self] in
+        Task { [weak self, taskID] in
             do {
                 try await Self.saveToPhotoLibrary(resultImage)
                 await MainActor.run {
+                    guard self?.activeTaskID == taskID else { return }
                     self?.saveState = .saved
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
-                        guard self?.saveState == .saved else { return }
+                        guard self?.activeTaskID == taskID, self?.saveState == .saved else { return }
                         self?.saveState = .idle
                     }
                 }
             } catch {
                 await MainActor.run {
+                    guard self?.activeTaskID == taskID else { return }
                     print("❌ [OpenReshot] save result error: \(error)")
                     self?.saveState = .failed
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
-                        guard self?.saveState == .failed else { return }
+                        guard self?.activeTaskID == taskID, self?.saveState == .failed else { return }
                         self?.saveState = .idle
                     }
                 }
@@ -653,6 +453,10 @@ final class AppState: ObservableObject {
     func saveEnhanceSettings(key: String) {
         geminiKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
         UserDefaults.standard.set(geminiKey, forKey: "OpenReshot.geminiKey")
+        if !geminiKey.isEmpty, processFailureKind == .missingAPIKey {
+            processFailed = false
+            processFailureKind = nil
+        }
     }
 
     private static func requestGeminiEnhance(imagePNG: Data, key: String) async throws -> UIImage {
@@ -1034,48 +838,106 @@ private enum OpenReshotPalette {
     static let bgHover = Color(red: 234.0 / 255.0, green: 229.0 / 255.0, blue: 219.0 / 255.0)
     static let textPrimary = Color(red: 58.0 / 255.0, green: 52.0 / 255.0, blue: 46.0 / 255.0)
     static let textSecondary = Color(red: 112.0 / 255.0, green: 103.0 / 255.0, blue: 94.0 / 255.0)
-    static let textTertiary = Color(red: 184.0 / 255.0, green: 173.0 / 255.0, blue: 160.0 / 255.0)
-    static let accent = Color(red: 199.0 / 255.0, green: 122.0 / 255.0, blue: 63.0 / 255.0)
-    static let accentMuted = Color(red: 195.0 / 255.0, green: 150.0 / 255.0, blue: 96.0 / 255.0)
-    static let coolMist = Color(red: 138.0 / 255.0, green: 166.0 / 255.0, blue: 188.0 / 255.0)
+    static let textTertiary = Color(red: 174.0 / 255.0, green: 180.0 / 255.0, blue: 192.0 / 255.0)
+    static let accent = Color(red: 255.0 / 255.0, green: 138.0 / 255.0, blue: 91.0 / 255.0)
+    static let accentMuted = Color(red: 98.0 / 255.0, green: 217.0 / 255.0, blue: 255.0 / 255.0)
+    static let coolMist = Color(red: 138.0 / 255.0, green: 255.0 / 255.0, blue: 184.0 / 255.0)
     static let border = Color(red: 224.0 / 255.0, green: 222.0 / 255.0, blue: 215.0 / 255.0)
     static let borderSubtle = Color(red: 240.0 / 255.0, green: 235.0 / 255.0, blue: 226.0 / 255.0)
+    static let twilightTop = Color(red: 9.0 / 255.0, green: 11.0 / 255.0, blue: 16.0 / 255.0)
+    static let twilightMid = Color(red: 13.0 / 255.0, green: 18.0 / 255.0, blue: 30.0 / 255.0)
+    static let twilightBottom = Color(red: 5.0 / 255.0, green: 7.0 / 255.0, blue: 13.0 / 255.0)
+    static let twilightText = Color(red: 247.0 / 255.0, green: 248.0 / 255.0, blue: 250.0 / 255.0)
+    static let twilightAccent = Color(red: 255.0 / 255.0, green: 179.0 / 255.0, blue: 106.0 / 255.0)
+    static let twilightCoral = Color(red: 255.0 / 255.0, green: 122.0 / 255.0, blue: 92.0 / 255.0)
+    static let twilightElectric = Color(red: 98.0 / 255.0, green: 217.0 / 255.0, blue: 255.0 / 255.0)
+    static let twilightMint = Color(red: 139.0 / 255.0, green: 255.0 / 255.0, blue: 184.0 / 255.0)
+    static let twilightInk = Color(red: 8.0 / 255.0, green: 11.0 / 255.0, blue: 18.0 / 255.0)
+    static let twilightButtonText = Color(red: 20.0 / 255.0, green: 16.0 / 255.0, blue: 23.0 / 255.0)
+    static let twilightPrimaryGradient = [
+        Color(red: 255.0 / 255.0, green: 179.0 / 255.0, blue: 106.0 / 255.0),
+        Color(red: 255.0 / 255.0, green: 122.0 / 255.0, blue: 92.0 / 255.0),
+        Color(red: 98.0 / 255.0, green: 217.0 / 255.0, blue: 255.0 / 255.0)
+    ]
+    static let twilightRingGradient = [
+        Color(red: 255.0 / 255.0, green: 179.0 / 255.0, blue: 106.0 / 255.0),
+        Color(red: 255.0 / 255.0, green: 122.0 / 255.0, blue: 92.0 / 255.0),
+        Color(red: 98.0 / 255.0, green: 217.0 / 255.0, blue: 255.0 / 255.0),
+        Color(red: 139.0 / 255.0, green: 255.0 / 255.0, blue: 184.0 / 255.0),
+        Color(red: 255.0 / 255.0, green: 179.0 / 255.0, blue: 106.0 / 255.0)
+    ]
+}
+
+private struct EmptyHomeDot {
+    let offsetX: CGFloat
+    let offsetY: CGFloat
+    let opacity: Double
+}
+
+private enum ReshotFlowPhase {
+    case inferring
+    case failed
+    case compose
+    case generating
+    case result
+}
+
+private struct CircleSectorShape: Shape {
+    var progress: CGFloat
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let clamped = min(max(progress, 0), 1)
+        guard clamped > 0 else { return Path() }
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let radius = min(rect.width, rect.height) / 2
+        var path = Path()
+        path.move(to: center)
+        path.addArc(
+            center: center,
+            radius: radius,
+            startAngle: .degrees(-90),
+            endAngle: .degrees(-90 + 360 * Double(clamped)),
+            clockwise: false
+        )
+        path.closeSubpath()
+        return path
+    }
 }
 
 struct ContentView: View {
     @StateObject private var app = AppState()
     @State private var pickerItem: PhotosPickerItem?
+    @State private var photoLoadTask: Task<Void, Never>?
+    @State private var showingPhotoPicker = false
     @State private var glowSpin = false
     @State private var showingSettings = false
+    @State private var comparingResult = false
+    @State private var generationStartedAt = Date()
+    @State private var resultFlash = false
+    @State private var saveToastVisible = false
+    @State private var dragBaseTilt = SIMD2<Float>(0, 0)
+    @State private var draggingStage = false
+    @State private var showDragHint = false
+    @State private var shutterMenuExpanded = false
+    @State private var shutterLongPressTriggered = false
+    @State private var frameStartPending = false
+    @State private var resultMenuExpanded = false
+    @State private var resultReplacementPending = false
+    @State private var focusGeminiKeyWhenSettingsOpen = false
     private let toolbarHeight: CGFloat = 88
 
     var body: some View {
-        ZStack {
-            appBackdrop
-
+        return ZStack {
             GeometryReader { geo in
                 if app.inputImage == nil {
                     emptyHome(size: geo.size)
                 } else {
-                    let horizontalInset = min(max(geo.size.width * 0.03, 10), 22)
-                    let stageTopInset = CGFloat(14)
-                    let stageBottomGap = CGFloat(12)
-                    let availableWidth = max(1, geo.size.width - horizontalInset * 2)
-                    let availableHeight = max(1, geo.size.height - toolbarHeight - stageTopInset - stageBottomGap)
-                    let aspect = max(0.1, app.imageAspect)
-                    let stageWidth = min(availableWidth, availableHeight * aspect)
-                    let stageHeight = stageWidth / aspect
-
-                    VStack(spacing: 0) {
-                        Spacer(minLength: stageTopInset)
-                        photoStage(width: stageWidth, height: stageHeight)
-                            .frame(width: stageWidth, height: stageHeight)
-                            .shadow(color: .black.opacity(0.16), radius: 18, y: 10)
-                        Spacer(minLength: stageBottomGap)
-                        toolbar
-                            .frame(height: toolbarHeight)
-                    }
-                    .frame(width: geo.size.width, height: geo.size.height)
+                    twilightPhotoFlow(size: geo.size)
                     .animation(.spring(response: 0.46, dampingFraction: 0.88), value: app.inputImage != nil)
                     .animation(.spring(response: 0.36, dampingFraction: 0.86), value: app.resultImage != nil)
                 }
@@ -1094,29 +956,87 @@ struct ContentView: View {
         .onChange(of: pickerItem) { _, item in
             guard let item else { return }
             print("📸 [OpenReshot] photo picked")
-            Task {
+            photoLoadTask?.cancel()
+            let taskID = app.beginImageLoadTask()
+            showDragHint = false
+            saveToastVisible = false
+            comparingResult = false
+            shutterMenuExpanded = false
+            resultMenuExpanded = false
+            frameStartPending = false
+            resultReplacementPending = false
+            photoLoadTask = Task { @MainActor in
                 do {
                     guard let data = try await item.loadTransferable(type: Data.self) else {
+                        guard app.isCurrentTask(taskID), !Task.isCancelled else { return }
                         print("❌ [OpenReshot] loadTransferable returned nil")
-                        app.processFailed = true
+                        app.failTaskIfCurrent(taskID)
                         return
                     }
+                    guard app.isCurrentTask(taskID), !Task.isCancelled else { return }
                     print("✅ [OpenReshot] loaded \(data.count) bytes")
                     guard let img = UIImage(data: data) else {
+                        guard app.isCurrentTask(taskID), !Task.isCancelled else { return }
                         print("❌ [OpenReshot] UIImage(data:) failed")
-                        app.processFailed = true
+                        app.failTaskIfCurrent(taskID)
                         return
                     }
-                    app.reconstruct(img, sourceData: data)
+                    app.reconstruct(img, sourceData: data, taskID: taskID)
+                } catch is CancellationError {
+                    return
                 } catch {
+                    guard app.isCurrentTask(taskID), !Task.isCancelled else { return }
                     print("❌ [OpenReshot] load error: \(error)")
-                    app.processFailed = true
+                    app.failTaskIfCurrent(taskID)
+                }
+            }
+        }
+        .onChange(of: app.reconstructingFrame) { _, isGenerating in
+            if isGenerating {
+                showDragHint = false
+                resultMenuExpanded = false
+                generationStartedAt = Date()
+            }
+        }
+        .onChange(of: app.rendererReady) { _, ready in
+            guard ready, app.inputImage != nil else { return }
+            revealShutterMenuAfterReconstruction()
+        }
+        .onChange(of: app.resultImage) { _, image in
+            guard image != nil else {
+                comparingResult = false
+                resultMenuExpanded = false
+                resultReplacementPending = false
+                return
+            }
+            showDragHint = false
+            shutterMenuExpanded = false
+            resultMenuExpanded = false
+            resultFlash = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+                resultFlash = false
+            }
+            revealResultMenuAfterImageAppears()
+        }
+        .onChange(of: app.saveState) { _, state in
+            if state == .saved {
+                withAnimation(.easeOut(duration: 0.20)) {
+                    saveToastVisible = true
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    withAnimation(.easeInOut(duration: 0.28)) {
+                        saveToastVisible = false
+                    }
                 }
             }
         }
         .sheet(isPresented: $showingSettings) {
-            SettingsView(app: app)
+            SettingsView(app: app, focusGeminiKeyOnAppear: focusGeminiKeyWhenSettingsOpen)
+                .onDisappear {
+                    focusGeminiKeyWhenSettingsOpen = false
+                }
         }
+        .photosPicker(isPresented: $showingPhotoPicker, selection: $pickerItem, matching: .images)
         .tint(OpenReshotPalette.accent)
     }
 
@@ -1134,88 +1054,914 @@ struct ContentView: View {
     }
 
     private func emptyHome(size: CGSize) -> some View {
-        let frameWidth = min(size.width - 44, size.height * 0.43)
-        let frameHeight = min(size.height * 0.54, frameWidth * 1.42)
-        let topInset = max(size.height * 0.11, 78)
+        let scale = min(max(min(size.width / 402, size.height / 874), 0.78), 1.08)
+        let stageWidth = min(size.width - 44, 330 * scale)
+        let stageHeight = 452 * scale
 
         return ZStack {
-            appBackdrop
+            twilightHomeBackdrop
 
-            VStack(spacing: 26) {
-                Text("OpenReshot")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(OpenReshotPalette.textSecondary.opacity(0.74))
-                    .padding(.top, topInset)
+            VStack(spacing: 0) {
+                Color.clear
+                    .frame(height: 104 * scale)
 
+                emptyHomeStage(width: stageWidth, height: stageHeight)
+
+                Text("换个机位，再拍一次")
+                    .font(.system(size: 15 * scale, weight: .medium, design: .rounded))
+                    .tracking(-0.2)
+                    .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.60))
+                    .padding(.top, 20 * scale)
+                    .frame(minHeight: 20 * scale)
+
+                Spacer(minLength: 0)
+            }
+            .frame(width: size.width, height: size.height)
+
+            bottomActionLayer(size: size, scale: scale) {
                 PhotosPicker(selection: $pickerItem, matching: .images) {
-                    VStack(spacing: 22) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(OpenReshotPalette.bgElevated.opacity(0.82))
+                    emptyBottomAction(scale: scale)
+                }
+                .buttonStyle(FluidPressButtonStyle(pressedScale: 0.94))
+                .accessibilityLabel("选择照片")
+            }
 
+            emptyHomeSettingsButton(size: size, scale: scale)
+        }
+    }
+
+    private var twilightHomeBackdrop: some View {
+        LinearGradient(
+            colors: [
+                OpenReshotPalette.twilightTop,
+                OpenReshotPalette.twilightMid,
+                OpenReshotPalette.twilightBottom
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        .ignoresSafeArea()
+    }
+
+    private func emptyHomeSettingsButton(size: CGSize, scale: CGFloat) -> some View {
+        VStack {
+            HStack {
+                Spacer()
+                Button {
+                    openSettings()
+                } label: {
+                    Text("···")
+                        .font(.system(size: 18 * scale, weight: .bold, design: .rounded))
+                        .tracking(2)
+                        .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.45))
+                        .frame(width: 48, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(FluidPressButtonStyle(pressedScale: 0.88))
+                .accessibilityLabel("设置")
+                .padding(.trailing, 22)
+                .padding(.top, 8 * scale)
+            }
+            Spacer()
+        }
+        .frame(width: size.width, height: size.height)
+        .zIndex(10)
+    }
+
+    private func emptyHomeStage(width: CGFloat, height: CGFloat) -> some View {
+        let illustrationWidth = width * 322 / 330
+        let illustrationHeight = illustrationWidth * 4 / 3
+
+        return ZStack(alignment: .center) {
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(
+                        OpenReshotPalette.twilightText.opacity(0.30),
+                        style: StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: [5, 4])
+                    )
+                    .frame(width: illustrationWidth * 0.50, height: illustrationWidth * 0.50 * 1.30)
+                    .rotation3DEffect(.degrees(19), axis: (x: 0, y: 1, z: 0), perspective: 0.82)
+                    .rotationEffect(.degrees(3.2))
+                    .offset(x: illustrationWidth * 0.39, y: illustrationHeight * 0.16)
+
+                ForEach(emptyHomeDots(width: illustrationWidth, height: illustrationHeight), id: \.offsetX) { dot in
+                    Circle()
+                        .fill(OpenReshotPalette.twilightAccent.opacity(dot.opacity))
+                        .frame(width: 5, height: 5)
+                        .offset(x: dot.offsetX, y: dot.offsetY)
+                }
+
+                TimelineView(.animation) { timeline in
+                    let seconds = timeline.date.timeIntervalSinceReferenceDate
+                    let phase = (sin(seconds * .pi * 2 / 5) + 1) / 2
+
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(
                             LinearGradient(
-                                colors: [
-                                    OpenReshotPalette.accent.opacity(0.10),
-                                    OpenReshotPalette.coolMist.opacity(0.12),
-                                    OpenReshotPalette.bgElevated.opacity(0.0)
-                                ],
+                                colors: OpenReshotPalette.twilightPrimaryGradient,
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             )
-                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-                            Image(systemName: "photo")
-                                .font(.system(size: 28, weight: .regular))
-                                .symbolRenderingMode(.hierarchical)
-                                .foregroundStyle(OpenReshotPalette.textTertiary.opacity(0.72))
-
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .strokeBorder(OpenReshotPalette.border.opacity(0.82), lineWidth: 1)
-                        }
-                        .frame(width: frameWidth, height: frameHeight)
-                        .shadow(color: .black.opacity(0.06), radius: 24, y: 12)
-
-                        Label("选择照片", systemImage: "plus")
-                            .font(.system(size: 15, weight: .semibold, design: .rounded))
-                            .foregroundStyle(OpenReshotPalette.bg)
-                            .symbolRenderingMode(.hierarchical)
-                            .frame(width: 128, height: 44)
-                            .background(OpenReshotPalette.textPrimary, in: Capsule())
-                            .overlay(
-                                Capsule()
-                                    .strokeBorder(OpenReshotPalette.accentMuted.opacity(0.24), lineWidth: 1)
-                            )
-                    }
+                        )
+                        .frame(width: illustrationWidth * 0.515, height: illustrationWidth * 0.515 * 1.31)
+                        .shadow(color: OpenReshotPalette.twilightElectric.opacity(0.22), radius: 26, y: 22)
+                        .rotation3DEffect(.degrees(-15 + 3 * phase), axis: (x: 0, y: 1, z: 0), perspective: 0.82)
+                        .rotationEffect(.degrees(-2.8 + phase))
+                        .offset(x: illustrationWidth * 0.13, y: illustrationHeight * 0.25 - 7 * phase)
                 }
-                .buttonStyle(FluidPressButtonStyle(pressedScale: 0.985))
-
-                Spacer(minLength: 26)
             }
-            .frame(width: size.width, height: size.height)
-
-            VStack {
-                HStack {
-                    Spacer()
-                    Button {
-                        showingSettings = true
-                    } label: {
-                        Image(systemName: "gearshape")
-                            .font(.system(size: 18, weight: .medium))
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(OpenReshotPalette.textSecondary.opacity(0.86))
-                            .frame(width: 44, height: 44)
-                            .contentShape(Circle())
-                            .openReshootGlassCircle()
-                    }
-                    .buttonStyle(FluidPressButtonStyle())
-                    .accessibilityLabel("设置")
-                    .padding(.trailing, 22)
-                    .padding(.top, max(size.height * 0.035, 28))
-                }
-                Spacer()
-            }
-            .frame(width: size.width, height: size.height)
+            .frame(width: illustrationWidth, height: illustrationHeight, alignment: .topLeading)
         }
+        .frame(width: width, height: height)
+    }
+
+    private func emptyHomeRingButton(scale: CGFloat) -> some View {
+        return ZStack {
+            Circle()
+                .fill(
+                    AngularGradient(
+                        colors: OpenReshotPalette.twilightRingGradient,
+                        center: .center,
+                        angle: .degrees(220)
+                    )
+                )
+                .frame(width: 74 * scale, height: 74 * scale)
+                .shadow(color: OpenReshotPalette.twilightElectric.opacity(0.24), radius: 30, y: 10)
+
+            Circle()
+                .fill(OpenReshotPalette.twilightMid)
+                .frame(width: 64 * scale, height: 64 * scale)
+
+            Image(systemName: "plus")
+                .font(.system(size: 25 * scale, weight: .regular, design: .rounded))
+                .foregroundStyle(OpenReshotPalette.twilightText)
+        }
+        .frame(width: 82 * scale, height: 82 * scale)
+    }
+
+    private func emptyBottomAction(scale: CGFloat) -> some View {
+        VStack(spacing: 14 * scale) {
+            emptyHomeRingButton(scale: scale * 0.86)
+
+            Text("放入照片")
+                .font(.system(size: 11 * scale, weight: .bold, design: .rounded))
+                .tracking(3)
+                .foregroundStyle(OpenReshotPalette.twilightAccent.opacity(0.80))
+                .frame(height: 12 * scale)
+        }
+        .contentShape(Rectangle())
+    }
+
+    private func bottomActionSlotHeight(scale: CGFloat) -> CGFloat {
+        (82 * 0.86 + 14 + 12) * scale
+    }
+
+    private func bottomActionLayer<Content: View>(
+        size: CGSize,
+        scale: CGFloat,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            content()
+                .frame(height: bottomActionSlotHeight(scale: scale), alignment: .top)
+            Color.clear
+                .frame(height: 0)
+        }
+        .frame(width: size.width, height: size.height)
+        .zIndex(5)
+    }
+
+    private func emptyHomeDots(width: CGFloat, height: CGFloat) -> [EmptyHomeDot] {
+        [
+            EmptyHomeDot(offsetX: width * 0.64, offsetY: height * 0.12, opacity: 0.30),
+            EmptyHomeDot(offsetX: width * 0.54, offsetY: height * 0.09, opacity: 0.50),
+            EmptyHomeDot(offsetX: width * 0.43, offsetY: height * 0.09, opacity: 0.75),
+            EmptyHomeDot(offsetX: width * 0.33, offsetY: height * 0.125, opacity: 1.00)
+        ]
+    }
+
+    private var reshotFlowPhase: ReshotFlowPhase {
+        if app.resultImage != nil { return .result }
+        if app.reconstructingFrame { return .generating }
+        if app.processFailed { return .failed }
+        if app.reconstructingScene || !app.rendererReady { return .inferring }
+        return .compose
+    }
+
+    private func twilightPhotoFlow(size: CGSize) -> some View {
+        let scale = min(max(min(size.width / 402, size.height / 874), 0.78), 1.08)
+        let photoTopInset = 66 * scale
+        let bottomInset: CGFloat = 0
+        let bottomActionHeight = bottomActionSlotHeight(scale: scale)
+        let photoBottomGap = 20 * scale
+        let bottomActionTop = size.height - bottomInset - bottomActionHeight
+        let maxStageWidth = min(size.width - 8 * scale, 396 * scale)
+        let maxStageHeight = max(1, bottomActionTop - photoTopInset - photoBottomGap)
+        let stageSize = fittedPhotoStageSize(maxWidth: maxStageWidth, maxHeight: maxStageHeight)
+        let phase = reshotFlowPhase
+
+        return ZStack {
+            twilightHomeBackdrop
+
+            VStack(spacing: 0) {
+                Color.clear
+                    .frame(height: photoTopInset)
+
+                twilightPhotoStage(width: stageSize.width, height: stageSize.height)
+                    .overlay(alignment: .bottom) {
+                        photoStageCaption(phase: phase, scale: scale)
+                    }
+
+                Spacer(minLength: 0)
+            }
+            .frame(width: size.width, height: size.height)
+
+            bottomActionLayer(size: size, scale: scale) {
+                flowBottomAction(phase: phase, scale: scale)
+            }
+
+            if saveToastVisible {
+                saveToast(size: size, scale: scale)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
+
+            emptyHomeSettingsButton(size: size, scale: scale)
+        }
+    }
+
+    private func fittedPhotoStageSize(maxWidth: CGFloat, maxHeight: CGFloat) -> CGSize {
+        let aspect = max(CGFloat(app.imageAspect), 0.01)
+        let heightAtMaxWidth = maxWidth / aspect
+
+        if heightAtMaxWidth <= maxHeight {
+            return CGSize(width: maxWidth, height: heightAtMaxWidth)
+        }
+
+        return CGSize(width: maxHeight * aspect, height: maxHeight)
+    }
+
+    private var photoTiltLimit: SIMD2<Float> {
+        let aspect = max(Float(app.imageAspect), 0.1)
+        let wideAmount = Self.clamp((aspect - 1.15) / 0.85, 0, 1)
+        let tallAmount = Self.clamp((1.0 / aspect - 1.0) / 1.0, 0, 1)
+        let xLimit: Float = 0.72 - 0.32 * wideAmount + 0.10 * tallAmount
+        let yLimit: Float = 0.56 - 0.18 * wideAmount + 0.06 * tallAmount
+        return SIMD2(
+            Self.clamp(xLimit, 0.36, 0.82),
+            Self.clamp(yLimit, 0.36, 0.62)
+        )
+    }
+
+    @ViewBuilder
+    private func flowBottomAction(phase: ReshotFlowPhase, scale: CGFloat) -> some View {
+        if phase == .result {
+            resultActionRow(scale: scale)
+        } else if phase == .failed {
+            failedActionRow(scale: scale)
+        } else if phase == .compose {
+            composeActionRow(scale: scale)
+        } else {
+            VStack(spacing: 5 * scale) {
+                Button {
+                } label: {
+                    flowRingButton(phase: phase, scale: scale * 0.86)
+                }
+                .disabled(true)
+                .buttonStyle(FluidPressButtonStyle(pressedScale: 0.93))
+                .accessibilityLabel(flowRingLabel(for: phase))
+
+                Text(flowRingLabel(for: phase))
+                    .font(.system(size: 10 * scale, weight: .semibold, design: .rounded))
+                    .tracking(0.8)
+                    .foregroundStyle(OpenReshotPalette.twilightAccent.opacity(0.80))
+                    .frame(minHeight: 12 * scale)
+            }
+        }
+    }
+
+    private func failedActionRow(scale: CGFloat) -> some View {
+        ZStack {
+            Button {
+                openPhotoPickerForReplacement()
+            } label: {
+                composeAuxiliaryButton(systemImage: "photo.on.rectangle", title: "换图", scale: scale)
+            }
+            .buttonStyle(FluidPressButtonStyle(pressedScale: 0.94))
+            .accessibilityLabel("换一张照片")
+            .offset(x: -88 * scale)
+
+            Button {
+                retryFailedReconstruction()
+            } label: {
+                VStack(spacing: 5 * scale) {
+                    flowRingButton(phase: .failed, scale: scale * 0.86)
+
+                    Text(flowRingLabel(for: .failed))
+                        .font(.system(size: 10 * scale, weight: .semibold, design: .rounded))
+                        .tracking(0.8)
+                        .foregroundStyle(OpenReshotPalette.twilightAccent.opacity(0.80))
+                        .frame(minHeight: 12 * scale)
+                }
+            }
+            .buttonStyle(FluidPressButtonStyle(pressedScale: 0.93))
+            .accessibilityLabel(failedRetryAccessibilityLabel)
+
+            if shouldShowFailedSettingsButton {
+                Button {
+                    openFailedSettingsAction()
+                } label: {
+                    composeAuxiliaryButton(systemImage: failedSettingsIcon, title: failedSettingsTitle, scale: scale)
+                }
+                .buttonStyle(FluidPressButtonStyle(pressedScale: 0.94))
+                .accessibilityLabel(failedSettingsTitle)
+                .offset(x: 88 * scale)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .padding(.horizontal, 42 * scale)
+    }
+
+    private func retryFailedReconstruction() {
+        switch app.processFailureKind {
+        case .missingAPIKey:
+            openSettings(focusGeminiKey: true)
+        case .enhancement:
+            app.reconstructCurrentFrame()
+        case .imageLoad:
+            openPhotoPickerForReplacement()
+        case .missingModel:
+            openSettings()
+        case .reconstruction, nil:
+            guard app.modelStore.activeModelURL() != nil else {
+                openSettings()
+                return
+            }
+            app.retryCurrentReconstruction()
+        }
+    }
+
+    private var failedRetryAccessibilityLabel: String {
+        switch app.processFailureKind {
+        case .missingAPIKey:
+            return "输入 Gemini API Key"
+        case .enhancement:
+            return "重试重拍"
+        case .imageLoad:
+            return "重新选择照片"
+        case .missingModel:
+            return "下载模型"
+        case .reconstruction, nil:
+            return app.modelStore.activeModelURL() == nil ? "下载模型" : "重试构建空间"
+        }
+    }
+
+    private var failedRetrySystemImage: String {
+        switch app.processFailureKind {
+        case .missingAPIKey:
+            return "key.fill"
+        case .enhancement:
+            return "arrow.clockwise"
+        case .imageLoad:
+            return "photo.on.rectangle"
+        case .missingModel:
+            return "arrow.down"
+        case .reconstruction, nil:
+            guard app.modelStore.activeModelURL() != nil else {
+                return "arrow.down"
+            }
+            return "arrow.clockwise"
+        }
+    }
+
+    private var failedRetryLabel: String {
+        switch app.processFailureKind {
+        case .missingAPIKey:
+            return "输入 API"
+        case .enhancement:
+            return "重试"
+        case .imageLoad:
+            return "换图"
+        case .missingModel:
+            return "下载模型"
+        case .reconstruction, nil:
+            guard app.modelStore.activeModelURL() != nil else {
+                return "下载模型"
+            }
+            return "重试"
+        }
+    }
+
+    private var failedCaption: String {
+        switch app.processFailureKind {
+        case .missingAPIKey:
+            return "需要输入 API Key 后重拍"
+        case .enhancement:
+            return "重拍失败,请检查网络后重试"
+        case .imageLoad:
+            return "载入失败,请重新选择照片"
+        case .missingModel:
+            return "需要下载模型后构建空间"
+        case .reconstruction, nil:
+            return "构建失败,请检查模型或重试"
+        }
+    }
+
+    private var failedSettingsTitle: String {
+        switch app.processFailureKind {
+        case .missingAPIKey:
+            return "API"
+        case .enhancement:
+            return "设置"
+        case .imageLoad:
+            return "设置"
+        case .missingModel:
+            return "模型"
+        case .reconstruction, nil:
+            guard app.modelStore.activeModelURL() != nil else {
+                return "模型"
+            }
+            return "设置"
+        }
+    }
+
+    private var failedSettingsIcon: String {
+        switch app.processFailureKind {
+        case .missingAPIKey:
+            return "key.fill"
+        case .missingModel:
+            return "arrow.down.circle"
+        case .reconstruction, nil:
+            guard app.modelStore.activeModelURL() != nil else {
+                return "arrow.down.circle"
+            }
+            return "gearshape"
+        default:
+            return "gearshape"
+        }
+    }
+
+    private var shouldShowFailedSettingsButton: Bool {
+        app.processFailureKind != .imageLoad
+    }
+
+    private func openFailedSettingsAction() {
+        if app.processFailureKind == .missingAPIKey {
+            openSettings(focusGeminiKey: true)
+            return
+        }
+        if app.processFailureKind == .reconstruction, app.modelStore.activeModelURL() == nil {
+            openSettings()
+            return
+        }
+        openSettings()
+    }
+
+    private func openSettings(focusGeminiKey: Bool = false) {
+        focusGeminiKeyWhenSettingsOpen = focusGeminiKey
+        showingSettings = true
+    }
+
+    private func composeActionRow(scale: CGFloat) -> some View {
+        ZStack {
+            Button {
+                openPhotoPickerForReplacement()
+            } label: {
+                composeAuxiliaryButton(systemImage: "photo.on.rectangle", title: "换图", scale: scale)
+            }
+            .buttonStyle(FluidPressButtonStyle(pressedScale: 0.94))
+            .accessibilityLabel("换一张照片")
+            .offset(x: shutterMenuExpanded ? -88 * scale : 0, y: shutterMenuExpanded ? 0 : -2 * scale)
+            .scaleEffect(shutterMenuExpanded ? 1 : 0.24)
+            .opacity(shutterMenuExpanded ? 1 : 0)
+            .blur(radius: shutterMenuExpanded ? 0 : 5)
+            .allowsHitTesting(shutterMenuExpanded)
+
+            Button {
+                resetPhotoViewpoint()
+            } label: {
+                composeAuxiliaryButton(systemImage: "scope", title: "回正", scale: scale)
+            }
+            .buttonStyle(FluidPressButtonStyle(pressedScale: 0.94))
+            .accessibilityLabel("回正视角")
+            .offset(x: shutterMenuExpanded ? 88 * scale : 0, y: shutterMenuExpanded ? 0 : -2 * scale)
+            .scaleEffect(shutterMenuExpanded ? 1 : 0.24)
+            .opacity(shutterMenuExpanded ? 1 : 0)
+            .blur(radius: shutterMenuExpanded ? 0 : 5)
+            .allowsHitTesting(shutterMenuExpanded)
+
+            VStack(spacing: 5 * scale) {
+                Button {
+                    if shutterLongPressTriggered {
+                        shutterLongPressTriggered = false
+                        return
+                    }
+                    collapseShutterMenuThenReconstruct()
+                } label: {
+                    flowRingButton(phase: .compose, scale: scale * 0.86)
+                }
+                .simultaneousGesture(
+                    LongPressGesture(minimumDuration: 0.34)
+                        .onEnded { _ in
+                            shutterLongPressTriggered = true
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
+                                shutterMenuExpanded = true
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                shutterLongPressTriggered = false
+                            }
+                        }
+                )
+                .buttonStyle(FluidPressButtonStyle(pressedScale: 0.93))
+                .accessibilityLabel("重拍照片")
+
+                Text(flowRingLabel(for: .compose))
+                    .font(.system(size: 10 * scale, weight: .semibold, design: .rounded))
+                    .tracking(0.8)
+                    .foregroundStyle(OpenReshotPalette.twilightAccent.opacity(0.80))
+                    .frame(minHeight: 12 * scale)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .padding(.horizontal, 42 * scale)
+    }
+
+    private func revealShutterMenuAfterReconstruction() {
+        guard app.inputImage != nil, app.rendererReady, app.resultImage == nil, !app.reconstructingFrame else { return }
+        frameStartPending = false
+        withAnimation(.spring(response: 0.46, dampingFraction: 0.70, blendDuration: 0.06)) {
+            shutterMenuExpanded = true
+        }
+    }
+
+    private func collapseShutterMenuThenReconstruct() {
+        guard !frameStartPending else { return }
+        frameStartPending = true
+        generationStartedAt = Date()
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+            shutterMenuExpanded = false
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+            guard frameStartPending else { return }
+            app.reconstructCurrentFrame()
+            frameStartPending = false
+        }
+    }
+
+    private func revealResultMenuAfterImageAppears() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            guard app.resultImage != nil, !app.reconstructingFrame else { return }
+            withAnimation(.spring(response: 0.46, dampingFraction: 0.70, blendDuration: 0.06)) {
+                resultMenuExpanded = true
+            }
+        }
+    }
+
+    private func collapseResultMenuThenOpenPhotoPicker() {
+        guard !resultReplacementPending else { return }
+        resultReplacementPending = true
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+            resultMenuExpanded = false
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+            guard resultReplacementPending else { return }
+            resultReplacementPending = false
+            openPhotoPickerForReplacement()
+        }
+    }
+
+    private func openPhotoPickerForReplacement() {
+        frameStartPending = false
+        resultReplacementPending = false
+        resultMenuExpanded = false
+        photoLoadTask?.cancel()
+        photoLoadTask = nil
+        app.cancelCurrentTaskAndClear()
+        showDragHint = false
+        saveToastVisible = false
+        comparingResult = false
+        dragBaseTilt = .zero
+        pickerItem = nil
+        showingPhotoPicker = true
+    }
+
+    private func composeAuxiliaryButton(systemImage: String, title: String, scale: CGFloat) -> some View {
+        VStack(spacing: 5 * scale) {
+            ZStack {
+                Circle()
+                    .fill(OpenReshotPalette.twilightBottom.opacity(0.72))
+                    .frame(width: 42 * scale, height: 42 * scale)
+                    .overlay(
+                        Circle()
+                            .strokeBorder(OpenReshotPalette.twilightText.opacity(0.30), lineWidth: 1.2)
+                    )
+
+                Image(systemName: systemImage)
+                    .font(.system(size: 15 * scale, weight: .medium))
+                    .symbolRenderingMode(.monochrome)
+                    .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.82))
+            }
+            .shadow(color: .black.opacity(0.30), radius: 14, y: 6)
+
+            Text(title)
+                .font(.system(size: 9 * scale, weight: .semibold, design: .rounded))
+                .tracking(0.6)
+                .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.52))
+        }
+        .frame(width: 54 * scale, height: 66 * scale)
+    }
+
+    private func resetPhotoViewpoint() {
+        dragBaseTilt = .zero
+        app.renderer?.setTiltTarget(.zero)
+        app.updateSheen(for: .zero)
+    }
+
+    private func twilightPhotoStage(width: CGFloat, height: CGFloat) -> some View {
+        return ZStack {
+            photoStage(width: width, height: height)
+                .frame(width: width, height: height)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .shadow(color: .black.opacity(0.50), radius: 30, y: 26)
+        }
+        .frame(width: width, height: height)
+    }
+
+    private func dragHintOverlay(scale: CGFloat) -> some View {
+        TimelineView(.animation) { timeline in
+            let phase = sin(timeline.date.timeIntervalSinceReferenceDate * 4.2)
+            let drift = CGFloat(phase) * 8 * scale
+
+            HStack {
+                Image(systemName: "chevron.left")
+                    .offset(x: -drift)
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .offset(x: drift)
+            }
+            .font(.system(size: 24 * scale, weight: .semibold))
+            .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.62))
+            .padding(.horizontal, 16 * scale)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(
+                LinearGradient(
+                    colors: [
+                        OpenReshotPalette.twilightBottom.opacity(0.28),
+                        .clear,
+                        OpenReshotPalette.twilightBottom.opacity(0.28)
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+        }
+        .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
+    private func photoStageCaption(phase: ReshotFlowPhase, scale: CGFloat) -> some View {
+        if let caption = flowCaption(for: phase) {
+            Text(caption)
+                .font(.system(size: 13 * scale, weight: .medium, design: .rounded))
+                .tracking(-0.1)
+                .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.78))
+                .padding(.horizontal, 13 * scale)
+                .frame(height: 28 * scale)
+                .background(OpenReshotPalette.twilightBottom.opacity(0.42), in: Capsule())
+                .padding(.bottom, 12 * scale)
+        }
+    }
+
+    private func flowCaption(for phase: ReshotFlowPhase) -> String? {
+        switch phase {
+        case .inferring, .generating:
+            return nil
+        case .failed:
+            return failedCaption
+        case .compose:
+            return nil
+        case .result:
+            return nil
+        }
+    }
+
+    private func flowRingLabel(for phase: ReshotFlowPhase) -> String {
+        switch phase {
+        case .inferring:
+            return "构建空间"
+        case .failed:
+            return failedRetryLabel
+        case .compose:
+            return "再拍一次"
+        case .generating:
+            return "正在重拍"
+        case .result:
+            return ""
+        }
+    }
+
+    private func flowRingButton(phase: ReshotFlowPhase, scale: CGFloat) -> some View {
+        TimelineView(.animation) { timeline in
+            let rotationSpeed = phase == .generating ? 0.95 : 1.1
+            let rotation = (phase == .inferring || phase == .generating)
+                ? timeline.date.timeIntervalSinceReferenceDate / rotationSpeed * 360
+                : 0
+
+            ZStack {
+                ringBackground(phase: phase, scale: scale)
+                    .frame(width: 74 * scale, height: 74 * scale)
+                    .rotationEffect(.degrees(rotation))
+                    .shadow(color: OpenReshotPalette.twilightElectric.opacity(0.24), radius: 30, y: 10)
+
+                Circle()
+                    .fill(ringInnerFill(phase: phase))
+                    .frame(width: 64 * scale, height: 64 * scale)
+
+                if phase == .generating {
+                    HStack(spacing: 4 * scale) {
+                        ForEach(0..<3, id: \.self) { index in
+                            Circle()
+                                .fill(OpenReshotPalette.twilightText)
+                                .frame(width: 4.5 * scale, height: 4.5 * scale)
+                                .opacity(0.32 + 0.50 * max(0, sin(timeline.date.timeIntervalSinceReferenceDate * 4.8 + Double(index) * 0.72)))
+                        }
+                    }
+                } else if phase == .compose {
+                    Image(systemName: "camera.aperture")
+                        .font(.system(size: 21 * scale, weight: .regular))
+                        .symbolRenderingMode(.monochrome)
+                        .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.86))
+                } else if phase == .failed {
+                    Image(systemName: failedRetrySystemImage)
+                        .font(.system(size: 21 * scale, weight: .semibold))
+                        .symbolRenderingMode(.monochrome)
+                        .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.86))
+                }
+            }
+            .frame(width: 82 * scale, height: 82 * scale)
+        }
+    }
+
+    @ViewBuilder
+    private func ringBackground(phase: ReshotFlowPhase, scale: CGFloat) -> some View {
+        if phase == .generating {
+            ZStack {
+                Circle()
+                    .stroke(OpenReshotPalette.twilightText.opacity(0.14), lineWidth: 5 * scale)
+
+                Circle()
+                    .trim(from: 0.08, to: 0.74)
+                    .stroke(
+                        AngularGradient(
+                            colors: OpenReshotPalette.twilightRingGradient,
+                            center: .center,
+                            angle: .degrees(220)
+                        ),
+                        style: StrokeStyle(lineWidth: 5 * scale, lineCap: .round)
+                    )
+            }
+        } else {
+            Circle()
+                .fill(
+                    AngularGradient(
+                        colors: OpenReshotPalette.twilightRingGradient,
+                        center: .center,
+                        angle: .degrees(220)
+                    )
+                )
+        }
+    }
+
+    private func ringInnerFill(phase: ReshotFlowPhase) -> AnyShapeStyle {
+        if phase == .compose || phase == .failed {
+            return AnyShapeStyle(OpenReshotPalette.twilightBottom.opacity(0.94))
+        }
+        return AnyShapeStyle(OpenReshotPalette.twilightMid)
+    }
+
+    private func resultActionRow(scale: CGFloat) -> some View {
+        ZStack {
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    comparingResult.toggle()
+                }
+            } label: {
+                resultAuxiliaryButton(
+                    systemImage: comparingResult ? "photo" : "rectangle.on.rectangle",
+                    title: "对比",
+                    highlighted: comparingResult,
+                    scale: scale
+                )
+            }
+            .buttonStyle(FluidPressButtonStyle(pressedScale: 0.96))
+            .accessibilityLabel(comparingResult ? "显示成片" : "对比原图")
+            .offset(x: resultMenuExpanded ? -88 * scale : 0, y: resultMenuExpanded ? 0 : -2 * scale)
+            .scaleEffect(resultMenuExpanded ? 1 : 0.24)
+            .opacity(resultMenuExpanded ? 1 : 0)
+            .blur(radius: resultMenuExpanded ? 0 : 5)
+            .allowsHitTesting(resultMenuExpanded)
+
+            Button {
+                app.saveResultImage()
+            } label: {
+                resultAuxiliaryButton(
+                    systemImage: saveButtonIcon,
+                    title: saveButtonText,
+                    highlighted: app.saveState == .saving || app.saveState == .saved,
+                    scale: scale
+                )
+            }
+            .disabled(app.saveState == .saving)
+            .buttonStyle(FluidPressButtonStyle(pressedScale: 0.96))
+            .accessibilityLabel("保存生成照片")
+            .offset(x: resultMenuExpanded ? 88 * scale : 0, y: resultMenuExpanded ? 0 : -2 * scale)
+            .scaleEffect(resultMenuExpanded ? 1 : 0.24)
+            .opacity(resultMenuExpanded ? 1 : 0)
+            .blur(radius: resultMenuExpanded ? 0 : 5)
+            .allowsHitTesting(resultMenuExpanded && app.saveState != .saving)
+
+            Button {
+                collapseResultMenuThenOpenPhotoPicker()
+            } label: {
+                emptyBottomAction(scale: scale)
+            }
+            .buttonStyle(FluidPressButtonStyle(pressedScale: 0.94))
+            .accessibilityLabel("放入照片")
+        }
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .padding(.horizontal, 42 * scale)
+    }
+
+    private func resultAuxiliaryButton(systemImage: String, title: String, highlighted: Bool, scale: CGFloat) -> some View {
+        VStack(spacing: 5 * scale) {
+            ZStack {
+                Circle()
+                    .fill(highlighted ? OpenReshotPalette.twilightText.opacity(0.11) : OpenReshotPalette.twilightBottom.opacity(0.72))
+                    .frame(width: 42 * scale, height: 42 * scale)
+                    .overlay(
+                        Circle()
+                            .strokeBorder(
+                                highlighted ? OpenReshotPalette.twilightAccent.opacity(0.86) : OpenReshotPalette.twilightText.opacity(0.30),
+                                lineWidth: 1.2
+                            )
+                    )
+
+                Image(systemName: systemImage)
+                    .font(.system(size: 15 * scale, weight: .medium))
+                    .symbolRenderingMode(.monochrome)
+                    .foregroundStyle(highlighted ? OpenReshotPalette.twilightAccent.opacity(0.94) : OpenReshotPalette.twilightText.opacity(0.82))
+            }
+            .shadow(color: .black.opacity(0.30), radius: 14, y: 6)
+
+            Text(title)
+                .font(.system(size: 9 * scale, weight: .semibold, design: .rounded))
+                .tracking(0.6)
+                .foregroundStyle(highlighted ? OpenReshotPalette.twilightAccent.opacity(0.72) : OpenReshotPalette.twilightText.opacity(0.52))
+        }
+        .frame(width: 54 * scale, height: 66 * scale)
+    }
+
+    private var saveButtonIcon: String {
+        switch app.saveState {
+        case .saving: return "hourglass"
+        case .saved: return "checkmark"
+        case .failed: return "arrow.clockwise"
+        case .idle: return "square.and.arrow.down"
+        }
+    }
+
+    private var saveButtonText: String {
+        switch app.saveState {
+        case .saving: return "保存中"
+        case .saved: return "已保存"
+        case .failed: return "重试"
+        case .idle: return "保存"
+        }
+    }
+
+    private func saveToast(size: CGSize, scale: CGFloat) -> some View {
+        HStack(spacing: 7 * scale) {
+            Image(systemName: "checkmark")
+                .font(.system(size: 12 * scale, weight: .bold))
+
+            Text("已保存到相册")
+                .font(.system(size: 12 * scale, weight: .semibold, design: .rounded))
+        }
+        .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.88))
+        .padding(.horizontal, 14 * scale)
+        .frame(height: 32 * scale)
+        .background(OpenReshotPalette.twilightBottom.opacity(0.68), in: Capsule())
+        .overlay(
+            Capsule()
+                .strokeBorder(OpenReshotPalette.twilightText.opacity(0.12), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.42), radius: 18, y: 8)
+        .position(x: size.width / 2, y: size.height - 118 * scale)
     }
 
     private func photoStage(width: CGFloat, height: CGFloat) -> some View {
@@ -1232,13 +1978,13 @@ struct ContentView: View {
             if let image = app.inputImage {
                 Image(uiImage: image)
                     .resizable()
-                    .scaledToFill()
+                    .scaledToFit()
                     .opacity(app.rendererReady ? 0 : 1)
                     .animation(.easeInOut(duration: 0.8), value: app.rendererReady)
                     .allowsHitTesting(false)
             }
 
-            if app.reconstructingScene || app.reconstructingFrame {
+            if app.reconstructingScene {
                 reconstructionOverlay
                     .transition(.opacity.animation(.easeInOut(duration: 0.28)))
             }
@@ -1255,22 +2001,49 @@ struct ContentView: View {
                         removal: .opacity.animation(.easeOut(duration: 0.20))
                     ))
             }
+
+            if resultFlash {
+                Rectangle()
+                    .fill(.white)
+                    .transition(.opacity.animation(.easeOut(duration: 0.22)))
+                    .allowsHitTesting(false)
+            }
         }
-        .background(Color.black)
+        .background(OpenReshotPalette.twilightBottom)
         .clipped()
         .contentShape(Rectangle())
         .gesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { value in
-                    guard app.rendererReady else { return }
-                    let positionX = Float(value.location.x / max(width, 1))
-                    let positionY = Float(value.location.y / max(height, 1))
+                    guard app.rendererReady, app.resultImage == nil, !app.reconstructingFrame else { return }
+                    if showDragHint {
+                        withAnimation(.easeOut(duration: 0.16)) {
+                            showDragHint = false
+                        }
+                    }
+                    if !draggingStage {
+                        dragBaseTilt = app.motionTilt
+                        draggingStage = true
+                    }
+                    let limit = photoTiltLimit
                     let tilt = SIMD2(
-                        Self.clamp(positionX * 2 - 1, -1, 1),
-                        Self.clamp(positionY * 2 - 1, -1, 1)
+                        Self.clamp(dragBaseTilt.x + Float(value.translation.width / 140), -limit.x, limit.x),
+                        Self.clamp(dragBaseTilt.y + Float(value.translation.height / 140), -limit.y, limit.y)
                     )
                     app.renderer?.setTiltTarget(tilt)
                     app.updateSheen(for: tilt)
+                }
+                .onEnded { _ in
+                    draggingStage = false
+                    dragBaseTilt = app.motionTilt
+                }
+        )
+        .simultaneousGesture(
+            TapGesture(count: 2)
+                .onEnded {
+                    guard app.rendererReady, app.resultImage == nil, !app.reconstructingFrame else { return }
+                    app.renderer?.setTiltTarget(.zero)
+                    app.updateSheen(for: .zero)
                 }
         )
     }
@@ -1458,6 +2231,32 @@ struct ContentView: View {
         .allowsHitTesting(false)
     }
 
+    private var twilightScanOverlay: some View {
+        GeometryReader { proxy in
+            TimelineView(.animation) { timeline in
+                let cycle = timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.7) / 1.7
+                let y = proxy.size.height * (-0.45 + 2.90 * cycle)
+
+                ZStack {
+                    OpenReshotPalette.twilightBottom.opacity(0.35)
+
+                    LinearGradient(
+                        colors: [
+                            OpenReshotPalette.twilightText.opacity(0),
+                            OpenReshotPalette.twilightText.opacity(0.22),
+                            OpenReshotPalette.twilightText.opacity(0)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: proxy.size.height * 0.45)
+                    .offset(y: y)
+                }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
     private var failureFlash: some View {
         Rectangle()
             .fill(.red.opacity(0.08))
@@ -1467,15 +2266,31 @@ struct ContentView: View {
     }
 
     private func resultOverlay(_ image: UIImage) -> some View {
-        ZStack {
-            Color.black.opacity(0.72)
+        let displayImage = comparingResult ? (app.inputImage ?? app.capturedFrame ?? image) : image
 
-            Image(uiImage: image)
+        return ZStack {
+            Image(uiImage: displayImage)
                 .resizable()
                 .scaledToFit()
-                .padding(18)
-                .shadow(color: .black.opacity(0.38), radius: 22, y: 12)
+
+            if comparingResult {
+                VStack {
+                    HStack {
+                        Text("原图")
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .tracking(2)
+                            .foregroundStyle(OpenReshotPalette.twilightText)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 5)
+                            .background(OpenReshotPalette.twilightBottom.opacity(0.65), in: Capsule())
+                        Spacer()
+                    }
+                    Spacer()
+                }
+                .padding(12)
+            }
         }
+        .animation(.easeInOut(duration: 0.18), value: comparingResult)
     }
 
     private var toolbar: some View {
@@ -1521,7 +2336,7 @@ struct ContentView: View {
                 .buttonStyle(FluidPressButtonStyle())
             } else {
                 Button {
-                    showingSettings = true
+                    openSettings()
                 } label: {
                     plainUtilityIcon(systemName: "gearshape")
                 }
@@ -1570,37 +2385,60 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var geminiKey: String
     @State private var showingGeminiHelp = false
+    @State private var didApplyInitialFocus = false
+    @FocusState private var geminiKeyFocused: Bool
+    private let focusGeminiKeyOnAppear: Bool
     private static let geminiAPIKeyURL = URL(string: "https://aistudio.google.com/app/apikey")!
 
-    init(app: AppState) {
+    init(app: AppState, focusGeminiKeyOnAppear: Bool = false) {
         self.app = app
+        self.focusGeminiKeyOnAppear = focusGeminiKeyOnAppear
         _modelStore = ObservedObject(wrappedValue: app.modelStore)
         _geminiKey = State(initialValue: app.geminiKey)
     }
 
     var body: some View {
         ZStack {
-            SettingsSheetStyle.background.ignoresSafeArea()
+            settingsBackdrop
 
             VStack(spacing: 0) {
-                settingsTopBar
+                Color.clear
+                    .frame(height: 42)
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 34) {
-                        Text("设置")
-                            .font(.system(size: 40, weight: .bold))
-                            .foregroundStyle(SettingsSheetStyle.primaryText)
-                            .padding(.top, 14)
+                VStack(spacing: 0) {
+                    grabber
+                    settingsTopBar
 
-                        modelSection
-                        qualitySection
-                        geminiSection
-                        clearSection
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text("设置")
+                                .font(.system(size: 29, weight: .semibold, design: .rounded))
+                                .tracking(0.2)
+                                .foregroundStyle(SettingsSheetStyle.primaryText)
+                                .padding(.horizontal, 2)
+                                .padding(.top, 28)
+                                .padding(.bottom, 34)
+
+                            modelSection
+                            qualitySection
+                                .padding(.top, 34)
+                            geminiSection
+                                .padding(.top, 34)
+
+                            Spacer(minLength: 70)
+                        }
+                        .padding(.horizontal, 24)
+                        .frame(maxWidth: .infinity, minHeight: 745, alignment: .topLeading)
                     }
-                    .padding(.horizontal, 34)
-                    .padding(.bottom, 56)
+                    .scrollIndicators(.hidden)
                 }
-                .scrollIndicators(.hidden)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(SettingsSheetStyle.panelBackground, in: UnevenRoundedRectangle(topLeadingRadius: 34, topTrailingRadius: 34))
+                .overlay(alignment: .top) {
+                    UnevenRoundedRectangle(topLeadingRadius: 34, topTrailingRadius: 34)
+                        .strokeBorder(SettingsSheetStyle.panelStroke, lineWidth: 1)
+                }
+                .shadow(color: .black.opacity(0.55), radius: 38, y: -12)
             }
 
             if showingGeminiHelp {
@@ -1613,68 +2451,112 @@ struct SettingsView: View {
                 .zIndex(10)
             }
         }
+        .onAppear {
+            guard focusGeminiKeyOnAppear, !didApplyInitialFocus else { return }
+            didApplyInitialFocus = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                geminiKeyFocused = true
+            }
+        }
+    }
+
+    private var settingsBackdrop: some View {
+        SettingsSheetStyle.pageBackground.ignoresSafeArea()
+    }
+
+    private var grabber: some View {
+        HStack {
+            Spacer()
+            Capsule()
+                .fill(SettingsSheetStyle.primaryText.opacity(0.20))
+                .frame(width: 42, height: 5)
+            Spacer()
+        }
+        .padding(.top, 10)
+        .padding(.bottom, 4)
     }
 
     private var settingsTopBar: some View {
         HStack {
-            Button("取消") {
+            Button {
                 dismiss()
+            } label: {
+                Image(systemName: "xmark")
             }
             .settingsChromeButton()
+            .accessibilityLabel("取消")
 
             Spacer()
 
-            Button("保存") {
+            Button {
                 app.saveEnhanceSettings(key: geminiKey)
                 dismiss()
+            } label: {
+                Label("保存", systemImage: "checkmark")
             }
-            .settingsChromeButton()
+            .buttonStyle(SettingsPrimaryCapsuleButtonStyle())
         }
-        .padding(.horizontal, 34)
-        .padding(.top, 18)
-        .padding(.bottom, 18)
+        .padding(.horizontal, 24)
+        .padding(.top, 8)
     }
 
     private var modelSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            sectionLabel("模型")
+        VStack(alignment: .leading, spacing: 14) {
+            sectionLabel("空间引擎")
 
             settingsCard {
                 VStack(spacing: 0) {
-                    HStack(spacing: 16) {
-                        Image(systemName: modelStateSymbol)
-                            .font(.system(size: 23, weight: .regular))
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(OpenReshotPalette.accent)
-                            .frame(width: 30)
+                    HStack(spacing: 14) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                .fill(SettingsSheetStyle.iconFill)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                        .strokeBorder(SettingsSheetStyle.cardStroke, lineWidth: 1)
+                                )
 
-                        Text("当前模型")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(SettingsSheetStyle.primaryText)
+                            Image(systemName: modelStateSymbol)
+                                .font(.system(size: 16, weight: .semibold))
+                                .symbolRenderingMode(.hierarchical)
+                                .foregroundStyle(SettingsSheetStyle.secondaryText)
+                        }
+                        .frame(width: 38, height: 38)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("空间模型")
+                                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                                .foregroundStyle(SettingsSheetStyle.primaryText)
+
+                            Text(modelStateCaption)
+                                .font(.system(size: 12, weight: .regular, design: .rounded))
+                                .foregroundStyle(SettingsSheetStyle.secondaryText)
+                                .lineLimit(1)
+                        }
 
                         Spacer()
 
-                        Text(modelStore.activeModelLabel)
-                            .font(.system(size: 16, weight: .regular))
-                            .foregroundStyle(SettingsSheetStyle.secondaryText)
+                        modelStatusControl
                     }
-                    .padding(.vertical, 15)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 18)
+                    .padding(.bottom, modelStore.isDownloading ? 14 : 18)
 
                     if modelStore.isDownloading {
                         VStack(alignment: .leading, spacing: 8) {
                             if let fraction = modelStore.progress.fractionCompleted {
                                 ProgressView(value: fraction)
-                                    .tint(OpenReshotPalette.accent)
+                                    .tint(SettingsSheetStyle.accent)
                             } else {
                                 ProgressView()
-                                    .tint(OpenReshotPalette.accent)
+                                    .tint(SettingsSheetStyle.accent)
                             }
 
                             Text(downloadProgressText)
                                 .font(.system(size: 12, weight: .regular))
                                 .foregroundStyle(SettingsSheetStyle.tertiaryText)
                         }
-                        .padding(.bottom, 14)
+                        .padding(.horizontal, 18)
+                        .padding(.bottom, 16)
                     }
 
                     if case let .failed(message) = modelStore.installState {
@@ -1683,132 +2565,213 @@ struct SettingsView: View {
                             .font(.system(size: 12, weight: .regular))
                             .foregroundStyle(Color.red.opacity(0.88))
                             .padding(.vertical, 14)
+                            .padding(.horizontal, 18)
                     }
-
-                    divider
-
-                    HStack(spacing: 18) {
-                        Button {
-                            modelStore.installModel {
-                                app.invalidateModelCache()
-                            }
-                        } label: {
-                            Label(modelStore.hasDownloadedModel ? "重新下载" : "下载模型",
-                                  systemImage: "arrow.down.circle")
-                        }
-                        .disabled(modelStore.isDownloading)
-                        .buttonStyle(SettingsInlineButtonStyle())
-
-                        Spacer()
-
-                        if modelStore.isDownloading {
-                            Button(role: .cancel) {
-                                modelStore.cancelDownload()
-                            } label: {
-                                Label("取消", systemImage: "xmark.circle")
-                            }
-                            .buttonStyle(SettingsInlineButtonStyle())
-                        } else if modelStore.hasDownloadedModel {
-                            Button(role: .destructive) {
-                                modelStore.removeDownloadedModel {
-                                    app.invalidateModelCache()
-                                }
-                            } label: {
-                                Label("删除", systemImage: "trash")
-                            }
-                            .buttonStyle(SettingsInlineButtonStyle(color: .red))
-                        }
-                    }
-                    .padding(.vertical, 15)
                 }
             }
         }
     }
 
+    @ViewBuilder
+    private var modelStatusControl: some View {
+        switch modelStore.installState {
+        case .downloaded:
+            Menu {
+                Button {
+                    modelStore.installModel {
+                        app.modelInstallationDidFinish()
+                    }
+                } label: {
+                    Label("重新下载", systemImage: "arrow.clockwise")
+                }
+
+                Button(role: .destructive) {
+                    modelStore.removeDownloadedModel {
+                        app.invalidateModelCache()
+                    }
+                } label: {
+                    Label("删除模型", systemImage: "trash")
+                }
+            } label: {
+                modelStatusCapsule(title: "已下载", systemImage: "checkmark")
+            }
+
+        case .bundled:
+            modelStatusCapsule(title: "内置", systemImage: "shippingbox")
+
+        case .checkingSource:
+            modelStatusCapsule(title: "检查中", systemImage: "arrow.down.circle")
+
+        case .downloading:
+            Button {
+                modelStore.cancelDownload()
+            } label: {
+                modelStatusCapsule(title: modelDownloadProgressBadge, systemImage: "xmark")
+            }
+            .buttonStyle(.plain)
+
+        case .failed:
+            Button {
+                modelStore.installModel {
+                    app.modelInstallationDidFinish()
+                }
+            } label: {
+                modelStatusCapsule(title: "重试", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.plain)
+
+        case .notInstalled:
+            Button {
+                modelStore.installModel {
+                    app.modelInstallationDidFinish()
+                }
+            } label: {
+                modelStatusCapsule(title: "下载", systemImage: "arrow.down")
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func modelStatusCapsule(title: String, systemImage: String) -> some View {
+        Label(title, systemImage: systemImage)
+            .font(.system(size: 11, weight: .semibold, design: .rounded))
+            .labelStyle(.titleAndIcon)
+            .foregroundStyle(modelStatusForeground)
+            .padding(.horizontal, 11)
+            .frame(height: 30)
+            .background(modelStatusBackground, in: Capsule())
+            .overlay(
+                Capsule()
+                    .strokeBorder(modelStatusForeground.opacity(0.22), lineWidth: 1)
+            )
+            .contentShape(Capsule())
+    }
+
     private var qualitySection: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 14) {
             sectionLabel("画质")
 
             settingsCard {
-                Picker("质量", selection: $app.quality) {
+                HStack(spacing: 6) {
                     ForEach(RenderQuality.allCases) { quality in
-                        Text(quality.title).tag(quality)
+                        Button {
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                                app.quality = quality
+                            }
+                        } label: {
+                            HStack(spacing: 7) {
+                                Image(systemName: quality.systemImage)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .symbolRenderingMode(.hierarchical)
+
+                                Text(quality.title)
+                                    .font(.system(size: 14, weight: app.quality == quality ? .semibold : .medium, design: .rounded))
+                            }
+                            .foregroundStyle(app.quality == quality ? SettingsSheetStyle.selectedText : SettingsSheetStyle.secondaryText)
+                            .frame(maxWidth: .infinity, minHeight: 42)
+                            .background(
+                                Group {
+                                    if app.quality == quality {
+                                        Capsule()
+                                            .fill(SettingsSheetStyle.accent)
+                                    } else {
+                                        Capsule()
+                                            .fill(Color.clear)
+                                    }
+                                }
+                            )
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
-                .pickerStyle(.segmented)
-                .padding(.vertical, 14)
+                .padding(5)
+                .background(SettingsSheetStyle.controlFill, in: Capsule())
+                .overlay(
+                    Capsule()
+                        .strokeBorder(SettingsSheetStyle.hairline, lineWidth: 1)
+                )
+                .padding(12)
             }
         }
     }
 
     private var geminiSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            sectionLabel("Gemini 重构")
+            sectionLabel("重构引擎")
 
             settingsCard {
-                SecureField("Gemini API Key", text: $geminiKey)
-                    .font(.system(size: 17, weight: .regular))
-                    .foregroundStyle(SettingsSheetStyle.primaryText)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .privacySensitive()
-                    .padding(.vertical, 16)
-            }
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "key.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(SettingsSheetStyle.accent.opacity(0.78))
+                            .frame(width: 18)
 
-            Button {
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    showingGeminiHelp = true
+                        SecureField("Gemini API Key", text: $geminiKey)
+                            .font(.system(size: 14, weight: .regular, design: .rounded))
+                            .tracking(0.2)
+                            .foregroundStyle(SettingsSheetStyle.primaryText)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .privacySensitive()
+                            .tint(SettingsSheetStyle.accent)
+                            .focused($geminiKeyFocused)
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(height: 48)
+                    .background(SettingsSheetStyle.controlFill, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 15, style: .continuous)
+                            .strokeBorder(SettingsSheetStyle.primaryText.opacity(0.14), lineWidth: 1)
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+                    .onTapGesture {
+                        geminiKeyFocused = true
+                    }
+
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            showingGeminiHelp = true
+                        }
+                    } label: {
+                        Text("如何获取 API Key?")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .tracking(0.3)
+                            .foregroundStyle(SettingsSheetStyle.accent)
+                            .padding(.leading, 2)
+                    }
+                    .buttonStyle(.plain)
                 }
-            } label: {
-                Text("如何获取 Gemini API?")
-                    .font(.system(size: 12, weight: .regular))
-                    .foregroundStyle(SettingsSheetStyle.tertiaryText)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 18)
             }
-            .buttonStyle(.plain)
-            .padding(.leading, 4)
         }
-    }
-
-    private var clearSection: some View {
-        Button(role: .destructive) {
-            geminiKey = ""
-        } label: {
-            HStack(spacing: 16) {
-                Image(systemName: "trash")
-                    .font(.system(size: 21, weight: .regular))
-                    .frame(width: 30)
-                Text("清除")
-                    .font(.system(size: 18, weight: .regular))
-                Spacer()
-            }
-            .padding(.horizontal, 26)
-            .padding(.vertical, 18)
-            .frame(maxWidth: .infinity)
-            .background(SettingsSheetStyle.cardFill, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(Color.red.opacity(0.88))
-        .padding(.top, 10)
     }
 
     private func sectionLabel(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 17, weight: .semibold))
-            .foregroundStyle(SettingsSheetStyle.secondaryText)
-            .padding(.leading, 22)
+            .font(.system(size: 10, weight: .semibold, design: .rounded))
+            .tracking(3.5)
+            .foregroundStyle(SettingsSheetStyle.primaryText.opacity(0.40))
+            .padding(.horizontal, 4)
     }
 
     private func settingsCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         content()
-            .padding(.horizontal, 26)
             .frame(maxWidth: .infinity)
-            .background(SettingsSheetStyle.cardFill, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .background(SettingsSheetStyle.cardFill, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .strokeBorder(SettingsSheetStyle.cardStroke, lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.12), radius: 10, y: 6)
     }
 
     private var divider: some View {
         Rectangle()
             .fill(SettingsSheetStyle.hairline)
-            .frame(height: 1)
+            .frame(height: 0.5)
+            .padding(.horizontal, 20)
     }
 
     private var modelStateSymbol: String {
@@ -1841,6 +2804,63 @@ struct SettingsView: View {
         return "已下载 \(received)"
     }
 
+    private var modelDownloadProgressBadge: String {
+        if modelStore.isDownloading, let fraction = modelStore.progress.fractionCompleted {
+            return "\(Int((fraction * 100).rounded(.down)))%"
+        }
+        return "下载中"
+    }
+
+    private var modelStateCaption: String {
+        switch modelStore.installState {
+        case .downloaded:
+            return "本机模型已就绪"
+        case .bundled:
+            return "随 App 内置可用"
+        case .checkingSource:
+            return "正在检查下载源"
+        case .downloading:
+            return "正在下载模型文件"
+        case .failed:
+            return "模型状态需要处理"
+        case .notInstalled:
+            return "首次重构前需要下载"
+        }
+    }
+
+    private var modelStateColor: Color {
+        switch modelStore.installState {
+        case .downloaded, .bundled:
+            return SettingsSheetStyle.successText
+        case .failed:
+            return SettingsSheetStyle.destructiveText
+        default:
+            return SettingsSheetStyle.accent
+        }
+    }
+
+    private var modelStatusForeground: Color {
+        switch modelStore.installState {
+        case .downloaded, .bundled:
+            return modelStateColor
+        case .failed:
+            return SettingsSheetStyle.destructiveText
+        default:
+            return SettingsSheetStyle.accent
+        }
+    }
+
+    private var modelStatusBackground: Color {
+        switch modelStore.installState {
+        case .downloaded, .bundled:
+            return modelStateColor.opacity(0.12)
+        case .failed:
+            return SettingsSheetStyle.destructiveText.opacity(0.11)
+        default:
+            return SettingsSheetStyle.accentSoft
+        }
+    }
+
     private static let byteFormatter: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
         formatter.allowedUnits = [.useMB, .useGB]
@@ -1850,27 +2870,36 @@ struct SettingsView: View {
 }
 
 private enum SettingsSheetStyle {
-    static let background = Color(uiColor: .systemGroupedBackground)
-    static let cardFill = Color(uiColor: .secondarySystemGroupedBackground).opacity(0.92)
-    static let controlFill = Color(uiColor: .tertiarySystemFill)
-    static let primaryText = Color(uiColor: .label)
-    static let secondaryText = Color(uiColor: .secondaryLabel)
-    static let tertiaryText = Color(uiColor: .tertiaryLabel)
-    static let hairline = Color(uiColor: .separator).opacity(0.48)
+    static let pageBackground = Color(red: 4.0 / 255.0, green: 6.0 / 255.0, blue: 10.0 / 255.0)
+    static let panelBackground = Color(red: 7.0 / 255.0, green: 10.0 / 255.0, blue: 16.0 / 255.0)
+    static let panelStroke = OpenReshotPalette.twilightText.opacity(0.045)
+    static let cardFill = Color(red: 27.0 / 255.0, green: 30.0 / 255.0, blue: 38.0 / 255.0)
+    static let cardStroke = OpenReshotPalette.twilightText.opacity(0.065)
+    static let controlFill = Color.black.opacity(0.22)
+    static let iconFill = Color.black.opacity(0.18)
+    static let accent = Color(red: 235.0 / 255.0, green: 164.0 / 255.0, blue: 99.0 / 255.0)
+    static let accentSoft = accent.opacity(0.13)
+    static let primaryText = OpenReshotPalette.twilightText
+    static let secondaryText = OpenReshotPalette.twilightText.opacity(0.52)
+    static let tertiaryText = OpenReshotPalette.twilightText.opacity(0.34)
+    static let selectedText = OpenReshotPalette.twilightButtonText
+    static let hairline = OpenReshotPalette.twilightText.opacity(0.075)
+    static let successText = Color(red: 128.0 / 255.0, green: 178.0 / 255.0, blue: 137.0 / 255.0)
+    static let destructiveText = Color(red: 232.0 / 255.0, green: 96.0 / 255.0, blue: 76.0 / 255.0)
 }
 
 private struct SettingsChromeButtonModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .font(.system(size: 17, weight: .semibold))
-            .foregroundStyle(OpenReshotPalette.accent)
-            .padding(.horizontal, 19)
-            .frame(height: 48)
-            .background(SettingsSheetStyle.controlFill, in: Capsule())
+            .font(.system(size: 13, weight: .semibold, design: .rounded))
+            .foregroundStyle(SettingsSheetStyle.primaryText.opacity(0.58))
+            .frame(width: 38, height: 38)
+            .background(SettingsSheetStyle.iconFill, in: Circle())
             .overlay(
-                Capsule()
-                    .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
+                Circle()
+                    .strokeBorder(SettingsSheetStyle.cardStroke, lineWidth: 1)
             )
+            .contentShape(Rectangle())
     }
 }
 
@@ -1880,15 +2909,17 @@ private extension View {
     }
 }
 
-private struct SettingsInlineButtonStyle: ButtonStyle {
-    var color: Color = OpenReshotPalette.accent
-
+private struct SettingsPrimaryCapsuleButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 17, weight: .regular))
-            .symbolRenderingMode(.hierarchical)
-            .foregroundStyle(color.opacity(configuration.isPressed ? 0.62 : 0.94))
-            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .font(.system(size: 13, weight: .semibold, design: .rounded))
+            .labelStyle(.titleAndIcon)
+            .foregroundStyle(SettingsSheetStyle.selectedText)
+            .padding(.horizontal, 16)
+            .frame(height: 38)
+            .background(SettingsSheetStyle.accent, in: Capsule())
+            .shadow(color: SettingsSheetStyle.accent.opacity(0.16), radius: 12, y: 5)
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
     }
 }
 
@@ -1939,7 +2970,7 @@ private struct GeminiAPIHelpOverlay: View {
                         .foregroundStyle(SettingsSheetStyle.primaryText)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 13)
-                        .background(OpenReshotPalette.accent.opacity(0.20), in: Capsule())
+                        .background(SettingsSheetStyle.accentSoft, in: Capsule())
                 }
             }
             .padding(22)

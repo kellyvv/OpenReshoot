@@ -17,6 +17,7 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
     private weak var view: MTKView?
     private var splat: SplatRenderer?
     private var cloudTask: Task<Void, Never>?
+    private var cloudTaskID = UUID()
     private var displayLink: CADisplayLink?
     private var readyNotified = false
     private let inFlight = DispatchSemaphore(value: ReshootRenderer.maxSimultaneousRenders)
@@ -51,14 +52,27 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
         displayLink?.invalidate()
     }
 
+    func clearCloud() {
+        cloudTask?.cancel()
+        cloudTaskID = UUID()
+        stopSmoothing()
+        tilt = .zero
+        targetTilt = .zero
+        readyNotified = false
+        splat = nil
+        view?.setNeedsDisplay()
+    }
+
     /// Build a MetalSplatter renderer from the reconstructed points (async: chunk + first sort).
     func setCloud(_ points: [SplatPoint], focus: Float, fpx: Float, width: Int, height: Int) {
         self.fpx = fpx; imgW = Float(width); imgH = Float(height); self.focus = focus
-        amplitude = SIMD2(min(0.60, focus * 0.22), min(0.40, focus * 0.15))
+        amplitude = SIMD2(min(0.46, focus * 0.19), min(0.30, focus * 0.13))
         print("🎛️ [OpenReshot] motion amplitude x=\(amplitude.x), y=\(amplitude.y), focus=\(focus)")
         guard let view else { return }
         let cf = view.colorPixelFormat, df = view.depthStencilPixelFormat, sc = view.sampleCount
         cloudTask?.cancel()
+        let taskID = UUID()
+        cloudTaskID = taskID
         stopSmoothing()
         tilt = .zero
         targetTilt = .zero
@@ -75,6 +89,7 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
                 r.onSortComplete = { [weak self] _ in
                     Task { @MainActor in
                         guard let self else { return }
+                        guard self.cloudTaskID == taskID else { return }
                         if self.displayLink == nil {
                             self.view?.setNeedsDisplay()
                         }
@@ -89,8 +104,9 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
                 await r.addChunk(chunk)
                 if Task.isCancelled { return }
                 await MainActor.run { [weak self] in
-                    self?.splat = r
-                    self?.view?.setNeedsDisplay()
+                    guard let self, self.cloudTaskID == taskID else { return }
+                    self.splat = r
+                    self.view?.setNeedsDisplay()
                     print("✅ [OpenReshot] MetalSplatter ready, \(r.splatCount) splats")
                 }
             } catch {
@@ -169,7 +185,11 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
     func draw(in view: MTKView) {
-        guard let splat, splat.isReadyToRender, let drawable = view.currentDrawable else { return }
+        guard let drawable = view.currentDrawable else { return }
+        guard let splat, splat.isReadyToRender else {
+            clearDrawable(drawable, in: view)
+            return
+        }
         let w = view.drawableSize.width, h = view.drawableSize.height
         guard w > 0, h > 0 else { return }
 
@@ -199,6 +219,18 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
         } catch {
             print("❌ [OpenReshot] render error: \(error)")
         }
+        cmd.commit()
+    }
+
+    private func clearDrawable(_ drawable: CAMetalDrawable, in view: MTKView) {
+        guard let cmd = queue.makeCommandBuffer() else { return }
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = drawable.texture
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].storeAction = .store
+        pass.colorAttachments[0].clearColor = view.clearColor
+        cmd.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
+        cmd.present(drawable)
         cmd.commit()
     }
 }

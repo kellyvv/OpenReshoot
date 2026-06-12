@@ -55,11 +55,17 @@ LOG.info("Model ready.")
 _PREDICT_LOCK = threading.Lock()
 
 ENHANCE_PROMPT = (
-    "This is a novel-view render of a photo: the main subject is sharp, but the edges "
-    "and disoccluded areas are blurry or missing. Fill in those blurry and missing "
-    "regions with realistic detail that is consistent with the scene, and make the whole "
-    "image sharp and photorealistic. Keep the subject, framing and composition unchanged. "
-    "Output one single complete, clear photo. 补充画面中模糊、缺失的部分并使整张图清晰化。"
+    "This image is a novel-view render produced from a 3D Gaussian Splatting reconstruction. "
+    "Because the camera viewpoint changed, some newly exposed edges, disoccluded regions, "
+    "stretched areas, warped details, holes, and blurry splat artifacts may appear. "
+    "Repair only those rendering artifacts. Fill missing or extended areas with realistic "
+    "detail consistent with the surrounding scene and the original photo. Keep the original "
+    "subject, layout, camera framing, lighting, colors, materials, and composition unchanged. "
+    "Do not restyle, beautify, replace, or add new main objects. If people are visible, "
+    "preserve them exactly as shown: same identity, appearance, hair, clothing, pose, "
+    "expression, and framing. Do not alter people or create any new person. Output one single "
+    "complete clear photo. 这是 3DGS 新视角渲染结果，只修复模糊、拉伸、露底、空洞和缺失区域；"
+    "如果画面里有人，人物必须保持原样。"
 )
 
 
