@@ -110,8 +110,16 @@ final class AppState: ObservableObject {
     private var subjectMaskRequestID = UUID()
     private var reconstructionRequestID = UUID()
     private var enhanceTask: Task<Void, Never>?
+    private var demoScenePending = false
+    private var didLoadDemoScene = false
+    private var didStartDemoModelPrefetch = false
     private static let geminiInputMaxSide: CGFloat = 1024
     private static let geminiModel = "gemini-3.1-flash-image"
+    private static let demoSceneResource = "DemoFLOW"
+    private static let demoSceneFocalPixels: Float = 1255.01
+    private static let demoSceneFocus: Float = 13.241617
+    private static let demoSceneWidth = 1086
+    private static let demoSceneHeight = 1448
     private static var memoryGB: UInt64 { ProcessInfo.processInfo.physicalMemory / 1_073_741_824 }
     private static let enhancePrompt = """
     This image is a novel-view render produced from a 3D Gaussian Splatting reconstruction. Because the camera viewpoint changed, some newly exposed edges, disoccluded regions, stretched areas, warped details, holes, and blurry splat artifacts may appear.
@@ -154,6 +162,50 @@ final class AppState: ObservableObject {
             self.processFailureKind = nil
             self.status = ""
         }
+        startPendingDemoSceneIfPossible()
+    }
+
+    @MainActor
+    func loadDemoSceneIfNeeded() {
+        guard !didLoadDemoScene, inputImage == nil else { return }
+        guard let imageURL = Bundle.main.url(forResource: Self.demoSceneResource, withExtension: "png"),
+              let sceneURL = Bundle.main.url(forResource: Self.demoSceneResource, withExtension: "ply"),
+              let data = try? Data(contentsOf: imageURL),
+              let image = UIImage(data: data) else {
+            print("⚠️ [OpenReshot] bundled demo scene missing")
+            return
+        }
+
+        print("🌄 [OpenReshot] loading bundled demo scene \(sceneURL.lastPathComponent)")
+        didLoadDemoScene = true
+        let taskID = UUID()
+        activeTaskID = taskID
+        reconstructionRequestID = taskID
+        subjectMaskRequestID = taskID
+        enhanceTask?.cancel()
+        enhanceTask = nil
+        renderer?.clearCloud()
+        currentSourceData = data
+        inputImage = image
+        imageAspect = max(0.1, CGFloat(Self.demoSceneWidth) / CGFloat(Self.demoSceneHeight))
+        hasCloud = false
+        rendererReady = false
+        sheenAmount = 0
+        sheenTiltX = 0
+        sheenTiltY = 0
+        motionTilt = .zero
+        reconstructingScene = true
+        reconstructingFrame = false
+        processFailed = false
+        processFailureKind = nil
+        capturedFrame = nil
+        resultImage = nil
+        saveState = .idle
+        subjectProtectionMask = nil
+        status = ""
+        demoScenePending = true
+        startPendingDemoSceneIfPossible()
+        prefetchModelForDemoIfNeeded()
     }
 
     @MainActor
@@ -398,6 +450,7 @@ final class AppState: ObservableObject {
         enhanceTask?.cancel()
         enhanceTask = nil
         renderer?.clearCloud()
+        demoScenePending = false
         status = ""
         hasCloud = false
         rendererReady = false
@@ -418,6 +471,36 @@ final class AppState: ObservableObject {
         resultImage = nil
         saveState = .idle
         subjectProtectionMask = nil
+    }
+
+    @MainActor
+    private func startPendingDemoSceneIfPossible() {
+        guard demoScenePending, let renderer else { return }
+        guard let sceneURL = Bundle.main.url(forResource: Self.demoSceneResource, withExtension: "ply") else {
+            demoScenePending = false
+            reconstructingScene = false
+            processFailed = true
+            processFailureKind = .imageLoad
+            print("❌ [OpenReshot] missing bundled demo PLY")
+            return
+        }
+
+        demoScenePending = false
+        renderer.setCloud(from: sceneURL,
+                          focus: Self.demoSceneFocus,
+                          fpx: Self.demoSceneFocalPixels,
+                          width: Self.demoSceneWidth,
+                          height: Self.demoSceneHeight)
+        hasCloud = true
+    }
+
+    @MainActor
+    private func prefetchModelForDemoIfNeeded() {
+        guard !didStartDemoModelPrefetch,
+              modelStore.activeModelURL() == nil,
+              !modelStore.isDownloading else { return }
+        didStartDemoModelPrefetch = true
+        modelStore.installModel()
     }
 
     @MainActor
@@ -951,6 +1034,8 @@ struct ContentView: View {
                let data = try? Data(contentsOf: url), let img = UIImage(data: data) {
                 print("🧪 [OpenReshot] autotest: reconstructing bundled koala.png")
                 app.reconstruct(img, sourceData: data)
+            } else {
+                app.loadDemoSceneIfNeeded()
             }
         }
         .onChange(of: pickerItem) { _, item in
@@ -1001,6 +1086,7 @@ struct ContentView: View {
         .onChange(of: app.rendererReady) { _, ready in
             guard ready, app.inputImage != nil else { return }
             revealShutterMenuAfterReconstruction()
+            revealDragHintAfterRendererReady()
         }
         .onChange(of: app.resultImage) { _, image in
             guard image != nil else {
@@ -1596,6 +1682,19 @@ struct ContentView: View {
         }
     }
 
+    private func revealDragHintAfterRendererReady() {
+        guard app.inputImage != nil, app.rendererReady, app.resultImage == nil, !app.reconstructingFrame else { return }
+        withAnimation(.easeOut(duration: 0.24)) {
+            showDragHint = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
+            guard showDragHint, app.rendererReady, app.resultImage == nil, !app.reconstructingFrame, !draggingStage else { return }
+            withAnimation(.easeOut(duration: 0.32)) {
+                showDragHint = false
+            }
+        }
+    }
+
     private func collapseShutterMenuThenReconstruct() {
         guard !frameStartPending else { return }
         frameStartPending = true
@@ -1965,7 +2064,9 @@ struct ContentView: View {
     }
 
     private func photoStage(width: CGFloat, height: CGFloat) -> some View {
-        ZStack {
+        let hintScale = min(max(width / 390, 0.82), 1.08)
+
+        return ZStack {
             photoGlow
             subjectBackfill
 
@@ -2007,6 +2108,11 @@ struct ContentView: View {
                     .fill(.white)
                     .transition(.opacity.animation(.easeOut(duration: 0.22)))
                     .allowsHitTesting(false)
+            }
+
+            if showDragHint, app.rendererReady, app.resultImage == nil, !app.reconstructingFrame {
+                dragHintOverlay(scale: hintScale)
+                    .transition(.opacity.animation(.easeOut(duration: 0.22)))
             }
         }
         .background(OpenReshotPalette.twilightBottom)

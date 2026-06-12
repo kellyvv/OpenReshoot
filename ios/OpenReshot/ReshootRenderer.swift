@@ -117,6 +117,63 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
         }
     }
 
+    /// Build a MetalSplatter renderer from a bundled splat scene without running reconstruction.
+    func setCloud(from url: URL, focus: Float, fpx: Float, width: Int, height: Int) {
+        self.fpx = fpx; imgW = Float(width); imgH = Float(height); self.focus = focus
+        amplitude = SIMD2(min(0.46, focus * 0.19), min(0.30, focus * 0.13))
+        print("🎛️ [OpenReshot] demo motion amplitude x=\(amplitude.x), y=\(amplitude.y), focus=\(focus)")
+        guard let view else { return }
+        let cf = view.colorPixelFormat, df = view.depthStencilPixelFormat, sc = view.sampleCount
+        cloudTask?.cancel()
+        let taskID = UUID()
+        cloudTaskID = taskID
+        stopSmoothing()
+        tilt = .zero
+        targetTilt = .zero
+        readyNotified = false
+        splat = nil
+
+        let metalDevice = device
+        cloudTask = Task.detached(priority: .userInitiated) { [weak self, url] in
+            do {
+                let r = try SplatRenderer(device: metalDevice, colorFormat: cf, depthFormat: df,
+                                          sampleCount: sc, maxViewCount: 1,
+                                          maxSimultaneousRenders: Self.maxSimultaneousRenders,
+                                          highQualityDepth: false)
+                r.onSortComplete = { [weak self] _ in
+                    Task { @MainActor in
+                        guard let self else { return }
+                        guard self.cloudTaskID == taskID else { return }
+                        if self.displayLink == nil {
+                            self.view?.setNeedsDisplay()
+                        }
+                        if !self.readyNotified {
+                            self.readyNotified = true
+                            self.onReady?()
+                        }
+                    }
+                }
+                let reader = try AutodetectSceneReader(url)
+                let points = try await reader.readAll()
+                if Task.isCancelled { return }
+                let chunk = try SplatChunk(device: metalDevice, from: points)
+                if Task.isCancelled { return }
+                await r.addChunk(chunk)
+                if Task.isCancelled { return }
+                await MainActor.run { [weak self] in
+                    guard let self, self.cloudTaskID == taskID else { return }
+                    self.splat = r
+                    self.view?.setNeedsDisplay()
+                    print("✅ [OpenReshot] bundled demo ready, \(r.splatCount) splats")
+                }
+            } catch {
+                await MainActor.run {
+                    print("❌ [OpenReshot] bundled demo setup failed: \(error)")
+                }
+            }
+        }
+    }
+
     func setTiltTarget(_ newTilt: SIMD2<Float>) {
         targetTilt = newTilt
         startSmoothing()

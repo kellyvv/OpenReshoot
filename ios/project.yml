@@ -28,6 +28,12 @@ targets:
       - path: OpenReshot
         excludes:
           - SHARP.mlpackage
+          - DemoFLOW.png
+          - DemoFLOW.ply
+      - path: OpenReshot/DemoFLOW.png
+        buildPhase: resources
+      - path: OpenReshot/DemoFLOW.ply
+        buildPhase: resources
     info:
       path: OpenReshot/Info.plist
       properties:

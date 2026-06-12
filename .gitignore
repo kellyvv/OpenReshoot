@@ -174,3 +174,4 @@ ios/*.xcodeproj
 ios/DerivedData/
 *.mlpackage
 *.ply
+!ios/OpenReshot/DemoFLOW.ply
