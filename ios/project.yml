@@ -34,9 +34,9 @@ targets:
         CFBundleDisplayName: Reshot
         NSPhotoLibraryUsageDescription: "Pick a photo to turn into a 3D parallax view."
         NSPhotoLibraryAddUsageDescription: "Save the reconstructed photo to your library."
-        OpenReshotModelDownloadBaseURL: "https://huggingface.co/kellyxiaowei/openreshoot-sharp-coreml/resolve/main/SHARP.mlpackage"
+        OpenReshotModelDownloadBaseURL: "https://modelscope.cn/models/kilywei/openreshoot-sharp-coreml/resolve/main/SHARP.mlpackage"
         OpenReshotModelDownloadMirrorBaseURLs:
-          - "https://modelscope.cn/models/kilywei/openreshoot-sharp-coreml/resolve/main/SHARP.mlpackage"
+          - "https://huggingface.co/kellyxiaowei/openreshoot-sharp-coreml/resolve/main/SHARP.mlpackage"
         UILaunchScreen: {}
         UIRequiresFullScreen: true
         UIApplicationSceneManifest:

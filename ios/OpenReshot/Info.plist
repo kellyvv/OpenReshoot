@@ -25,10 +25,10 @@
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Pick a photo to turn into a 3D parallax view.</string>
 	<key>OpenReshotModelDownloadBaseURL</key>
-	<string>https://huggingface.co/kellyxiaowei/openreshoot-sharp-coreml/resolve/main/SHARP.mlpackage</string>
+	<string>https://modelscope.cn/models/kilywei/openreshoot-sharp-coreml/resolve/main/SHARP.mlpackage</string>
 	<key>OpenReshotModelDownloadMirrorBaseURLs</key>
 	<array>
-		<string>https://modelscope.cn/models/kilywei/openreshoot-sharp-coreml/resolve/main/SHARP.mlpackage</string>
+		<string>https://huggingface.co/kellyxiaowei/openreshoot-sharp-coreml/resolve/main/SHARP.mlpackage</string>
 	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>

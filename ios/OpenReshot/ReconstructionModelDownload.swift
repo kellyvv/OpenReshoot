@@ -1111,11 +1111,6 @@ private actor ResumableAssetDownloader {
         var previousSource: DownloadFile.Source?
         var sources = orderedSources(file.sources)
 
-        if let selectedSourceLabel = currentManifest.files.first(where: { $0.relativePath == file.relativePath })?.selectedSourceLabel,
-           let index = sources.firstIndex(where: { $0.label == selectedSourceLabel }) {
-            sources.insert(sources.remove(at: index), at: 0)
-        }
-
         for (attempt, source) in sources.enumerated() {
             if let previousSource {
                 await observer.onSourceSwitch(
