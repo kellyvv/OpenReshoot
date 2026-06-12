@@ -9,6 +9,7 @@ import CoreImage.CIFilterBuiltins
 import ImageIO
 import Vision
 import simd
+import SplatIO
 
 @main
 struct OpenReshotApp: App {
@@ -79,6 +80,18 @@ enum ProcessFailureKind: Equatable {
     case enhancement
 }
 
+private struct PreviewExportMetadata: Codable, Sendable {
+    let formatVersion: Int
+    let splatFormat: String
+    let splatCount: Int
+    let focus: Float
+    let focalPixels: Float
+    let width: Int
+    let height: Int
+    let sourceImageName: String
+    let splatFileName: String
+}
+
 /// Holds the model + renderer and drives reconstruction off the main thread.
 final class AppState: ObservableObject {
     @Published var status = ""
@@ -102,6 +115,7 @@ final class AppState: ObservableObject {
     @Published var saveState: SaveState = .idle
     @Published var subjectProtectionMask: UIImage?
     @Published var geminiKey: String
+    @Published var hasExportablePreview = false
     let modelStore = ReconstructionModelStore()
     var renderer: ReshootRenderer?
     private let modelQueue = DispatchQueue(label: "OpenReshot.model", qos: .userInitiated)
@@ -112,6 +126,8 @@ final class AppState: ObservableObject {
     private var subjectMaskRequestID = UUID()
     private var reconstructionRequestID = UUID()
     private var enhanceTask: Task<Void, Never>?
+    private var currentCloudPoints: [SplatPoint]?
+    private var currentPreviewMetadata: PreviewExportMetadata?
     private var demoScenePending = false
     private var didLoadDemoScene = false
     private var didStartDemoModelPrefetch = false
@@ -189,6 +205,9 @@ final class AppState: ObservableObject {
         enhanceTask = nil
         renderer?.clearCloud()
         currentSourceData = nil
+        currentCloudPoints = nil
+        currentPreviewMetadata = nil
+        hasExportablePreview = false
         inputImage = image
         imageAspect = max(0.1, CGFloat(Self.demoSceneWidth) / CGFloat(Self.demoSceneHeight))
         hasCloud = false
@@ -259,6 +278,9 @@ final class AppState: ObservableObject {
         previewMode = false
         loadingPreviewScene = false
         demoScenePending = false
+        currentCloudPoints = nil
+        currentPreviewMetadata = nil
+        hasExportablePreview = false
         inputImage = displayImage
         imageAspect = max(0.1, displayImage.size.width / max(displayImage.size.height, 1))
         hasCloud = false
@@ -302,6 +324,19 @@ final class AppState: ObservableObject {
                     self.renderer?.setCloud(g, focus: focus,
                                             fpx: out.fpx, width: out.width, height: out.height)
                     self.hasCloud = true
+                    self.currentCloudPoints = g
+                    self.currentPreviewMetadata = PreviewExportMetadata(
+                        formatVersion: 1,
+                        splatFormat: "ply-sh0",
+                        splatCount: g.count,
+                        focus: focus,
+                        focalPixels: out.fpx,
+                        width: out.width,
+                        height: out.height,
+                        sourceImageName: "OpenReshotPreview.png",
+                        splatFileName: "OpenReshotPreview.ply"
+                    )
+                    self.hasExportablePreview = true
                     self.status = ""
                 }
             } catch {
@@ -363,6 +398,22 @@ final class AppState: ObservableObject {
         guard !previewMode else { return }
         guard let inputImage else { return }
         reconstruct(inputImage, sourceData: currentSourceData)
+    }
+
+    @MainActor
+    func exportCurrentPreviewPackage() async throws -> [URL] {
+        guard let points = currentCloudPoints,
+              let metadata = currentPreviewMetadata,
+              let imageData = inputImage?.pngData() else {
+            throw err("当前没有可导出的 3D 预览")
+        }
+
+        let urls = try await Self.writePreviewExportPackage(
+            points: points,
+            imageData: imageData,
+            metadata: metadata
+        )
+        return urls
     }
 
     @MainActor
@@ -464,6 +515,9 @@ final class AppState: ObservableObject {
         demoScenePending = false
         previewMode = false
         loadingPreviewScene = false
+        currentCloudPoints = nil
+        currentPreviewMetadata = nil
+        hasExportablePreview = false
         status = ""
         hasCloud = false
         rendererReady = false
@@ -517,6 +571,34 @@ final class AppState: ObservableObject {
               !modelStore.isDownloading else { return }
         didStartDemoModelPrefetch = true
         modelStore.installModel()
+    }
+
+    private static func writePreviewExportPackage(
+        points: [SplatPoint],
+        imageData: Data,
+        metadata: PreviewExportMetadata
+    ) async throws -> [URL] {
+        try await Task.detached(priority: .userInitiated) {
+            let fileManager = FileManager.default
+            let directory = fileManager.temporaryDirectory
+                .appendingPathComponent("OpenReshotPreview-\(UUID().uuidString)", isDirectory: true)
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+
+            let plyURL = directory.appendingPathComponent(metadata.splatFileName)
+            let imageURL = directory.appendingPathComponent(metadata.sourceImageName)
+            let jsonURL = directory.appendingPathComponent("OpenReshotPreview.json")
+
+            let writer = try SplatPLYSceneWriter(toFileAtPath: plyURL.path)
+            try await writer.start(sphericalHarmonicDegree: 0, binary: true, pointCount: points.count)
+            try await writer.write(points)
+            try await writer.close()
+
+            try imageData.write(to: imageURL, options: [.atomic])
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(metadata).write(to: jsonURL, options: [.atomic])
+            return [plyURL, imageURL, jsonURL]
+        }.value
     }
 
     @MainActor
@@ -2525,6 +2607,10 @@ struct SettingsView: View {
     @State private var geminiKey: String
     @State private var showingGeminiHelp = false
     @State private var didApplyInitialFocus = false
+    @State private var exportingPreview = false
+    @State private var previewExportError: String?
+    @State private var previewExportURLs: [URL] = []
+    @State private var showingPreviewExportShare = false
     @FocusState private var geminiKeyFocused: Bool
     private let focusGeminiKeyOnAppear: Bool
     private static let geminiAPIKeyURL = URL(string: "https://aistudio.google.com/app/apikey")!
@@ -2561,6 +2647,10 @@ struct SettingsView: View {
                             modelSection
                             qualitySection
                                 .padding(.top, 34)
+                            if shouldShowPreviewExportSection {
+                                previewExportSection
+                                    .padding(.top, 34)
+                            }
                             geminiSection
                                 .padding(.top, 34)
 
@@ -2596,6 +2686,9 @@ struct SettingsView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                 geminiKeyFocused = true
             }
+        }
+        .sheet(isPresented: $showingPreviewExportShare) {
+            ShareSheet(activityItems: previewExportURLs)
         }
     }
 
@@ -2832,6 +2925,66 @@ struct SettingsView: View {
                 )
                 .padding(12)
             }
+        }
+    }
+
+    private var shouldShowPreviewExportSection: Bool {
+        app.hasExportablePreview || exportingPreview || previewExportError != nil
+    }
+
+    private var previewExportSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            sectionLabel("3D 预览")
+
+            settingsCard {
+                VStack(spacing: 0) {
+                    Button {
+                        exportCurrentPreview()
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: exportingPreview ? "hourglass" : "square.and.arrow.up")
+                                .font(.system(size: 15, weight: .semibold))
+                                .symbolRenderingMode(.hierarchical)
+                                .frame(width: 20)
+
+                            Text(exportingPreview ? "导出中" : "导出 3D 预览")
+                                .font(.system(size: 15, weight: .semibold, design: .rounded))
+
+                            Spacer()
+                        }
+                        .foregroundStyle(app.hasExportablePreview ? SettingsSheetStyle.primaryText : SettingsSheetStyle.tertiaryText)
+                        .padding(.horizontal, 18)
+                        .frame(height: 52)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!app.hasExportablePreview || exportingPreview)
+
+                    if let previewExportError {
+                        divider
+                        Label(previewExportError, systemImage: "exclamationmark.triangle")
+                            .font(.system(size: 12, weight: .regular))
+                            .foregroundStyle(Color.red.opacity(0.88))
+                            .padding(.vertical, 14)
+                            .padding(.horizontal, 18)
+                    }
+                }
+            }
+        }
+    }
+
+    private func exportCurrentPreview() {
+        guard !exportingPreview else { return }
+        exportingPreview = true
+        previewExportError = nil
+        Task { @MainActor in
+            do {
+                previewExportURLs = try await app.exportCurrentPreviewPackage()
+                showingPreviewExportShare = true
+            } catch {
+                previewExportError = error.localizedDescription
+            }
+            exportingPreview = false
         }
     }
 
@@ -3168,6 +3321,16 @@ private struct GeminiAPIHelpOverlay: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
+}
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let activityItems: [URL]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 struct MetalView: UIViewRepresentable {
