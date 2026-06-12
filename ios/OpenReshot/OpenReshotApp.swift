@@ -2539,11 +2539,12 @@ struct SettingsView: View {
                     }
                     .padding(.horizontal, 18)
                     .padding(.top, 18)
-                    .padding(.bottom, modelStore.isDownloading ? 14 : 18)
+                    .padding(.bottom, shouldShowModelActivity ? 14 : 18)
 
-                    if modelStore.isDownloading {
+                    if shouldShowModelActivity {
                         VStack(alignment: .leading, spacing: 8) {
-                            if let fraction = modelStore.progress.fractionCompleted {
+                            if case .downloading = modelStore.installState,
+                               let fraction = modelStore.progress.fractionCompleted {
                                 ProgressView(value: fraction)
                                     .tint(SettingsSheetStyle.accent)
                             } else {
@@ -2551,7 +2552,7 @@ struct SettingsView: View {
                                     .tint(SettingsSheetStyle.accent)
                             }
 
-                            Text(downloadProgressText)
+                            Text(modelActivityText)
                                 .font(.system(size: 12, weight: .regular))
                                 .foregroundStyle(SettingsSheetStyle.tertiaryText)
                         }
@@ -2600,13 +2601,13 @@ struct SettingsView: View {
             modelStatusCapsule(title: "内置", systemImage: "shippingbox")
 
         case .checkingSource:
-            modelStatusCapsule(title: "检查中", systemImage: "arrow.down.circle")
+            modelStatusCapsule(title: "连接中", systemImage: "arrow.down.circle")
 
         case .downloading:
             Button {
                 modelStore.cancelDownload()
             } label: {
-                modelStatusCapsule(title: modelDownloadProgressBadge, systemImage: "xmark")
+                modelStatusCapsule(title: "取消", systemImage: "xmark")
             }
             .buttonStyle(.plain)
 
@@ -2626,7 +2627,7 @@ struct SettingsView: View {
                     app.modelInstallationDidFinish()
                 }
             } label: {
-                modelStatusCapsule(title: "下载", systemImage: "arrow.down")
+                modelStatusCapsule(title: modelStore.hasResumeProgress ? "继续" : "下载", systemImage: "arrow.down")
             }
             .buttonStyle(.plain)
         }
@@ -2791,6 +2792,9 @@ struct SettingsView: View {
 
     private var downloadProgressText: String {
         let progress = modelStore.progress
+        guard progress.bytesReceived > 0 else {
+            return "正在连接 \(modelActiveSourceLabel)"
+        }
         let received = Self.byteFormatter.string(fromByteCount: progress.bytesReceived)
         if let total = progress.totalBytes {
             let totalText = Self.byteFormatter.string(fromByteCount: total)
@@ -2804,11 +2808,34 @@ struct SettingsView: View {
         return "已下载 \(received)"
     }
 
-    private var modelDownloadProgressBadge: String {
-        if modelStore.isDownloading, let fraction = modelStore.progress.fractionCompleted {
-            return "\(Int((fraction * 100).rounded(.down)))%"
+    private var shouldShowModelActivity: Bool {
+        switch modelStore.installState {
+        case .checkingSource, .downloading:
+            return true
+        default:
+            return false
         }
-        return "下载中"
+    }
+
+    private var modelActivityText: String {
+        switch modelStore.installState {
+        case .checkingSource:
+            return modelStore.hasResumeProgress
+                ? "正在准备继续下载"
+                : "正在连接 \(modelStore.primaryDownloadSourceLabel)"
+        case .downloading:
+            return downloadProgressText
+        default:
+            return modelStateCaption
+        }
+    }
+
+    private var modelActiveSourceLabel: String {
+        modelStore.progress.activeSourceLabel ?? modelStore.primaryDownloadSourceLabel
+    }
+
+    private var modelTransferVerb: String {
+        modelStore.hasResumeProgress ? "继续" : "正在"
     }
 
     private var modelStateCaption: String {
@@ -2818,13 +2845,15 @@ struct SettingsView: View {
         case .bundled:
             return "随 App 内置可用"
         case .checkingSource:
-            return "正在检查下载源"
+            return modelStore.hasResumeProgress
+                ? "正在准备继续下载"
+                : "正在连接 \(modelStore.primaryDownloadSourceLabel)"
         case .downloading:
-            return "正在下载模型文件"
+            return "\(modelTransferVerb)从 \(modelActiveSourceLabel) 下载"
         case .failed:
             return "模型状态需要处理"
         case .notInstalled:
-            return "首次重构前需要下载"
+            return modelStore.hasResumeProgress ? "可继续上次下载" : "首次重构前需要下载"
         }
     }
 

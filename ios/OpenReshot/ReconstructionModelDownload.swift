@@ -67,7 +67,7 @@ final class ReconstructionModelStore: ObservableObject {
         case .downloading:
             return "下载中"
         case .checkingSource:
-            return "检查中"
+            return "连接中"
         case .failed:
             return hasDownloadedModel ? "已下载" : (Self.bundledModelURL == nil ? "下载" : "内置")
         case .notInstalled:
@@ -77,6 +77,16 @@ final class ReconstructionModelStore: ObservableObject {
 
     var hasDownloadedModel: Bool {
         FileManager.default.fileExists(atPath: Self.downloadedModelURL.path)
+    }
+
+    var hasResumeProgress: Bool {
+        progress.bytesReceived > 0 && !hasDownloadedModel
+    }
+
+    var primaryDownloadSourceLabel: String {
+        Self.builtInDownloadBaseURL.map {
+            Self.sourceLabel(for: $0, fallback: "下载源")
+        } ?? "下载源"
     }
 
     nonisolated func activeModelURL() -> URL? {
@@ -943,8 +953,11 @@ private actor DownloadProgressRecorder {
         self.minimumManifestWriteInterval = minimumManifestWriteInterval
     }
 
-    func record(manifest: DownloadManifest, snapshot: DownloadProgressSnapshot) async {
+    func record(manifest: DownloadManifest, snapshot: DownloadProgressSnapshot, resetsBaseline: Bool = false) async {
         guard !isFinished else { return }
+        if resetsBaseline {
+            latestObservedBytes = -1
+        }
         guard snapshot.downloadedBytes >= latestObservedBytes else { return }
         latestObservedBytes = snapshot.downloadedBytes
         pendingManifest = manifest
@@ -1109,7 +1122,7 @@ private actor ResumableAssetDownloader {
         var currentManifest = manifest
         var lastError: Error?
         var previousSource: DownloadFile.Source?
-        var sources = orderedSources(file.sources)
+        let sources = orderedSources(file.sources)
 
         for (attempt, source) in sources.enumerated() {
             if let previousSource {
@@ -1348,7 +1361,11 @@ private actor ResumableAssetDownloader {
                         phase: .downloading,
                         updatedAt: Date()
                     )
-                    await progressRecorder.record(manifest: updated, snapshot: snapshot)
+                    await progressRecorder.record(
+                        manifest: updated,
+                        snapshot: snapshot,
+                        resetsBaseline: normalizedProgress.resetBaseline
+                    )
                 }
             }
             await progressRecorder.finish()
