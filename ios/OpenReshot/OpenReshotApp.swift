@@ -135,7 +135,7 @@ final class AppState: ObservableObject {
     private static let geminiModel = "gemini-3.1-flash-image"
     private static let demoSceneResource = "DemoFLOW"
     private static let demoSceneFocalPixels: Float = 1330.3168
-    private static let demoSceneFocus: Float = 27.689307
+    private static let demoSceneFocus: Float = 1.4492188
     private static let demoSceneWidth = 941
     private static let demoSceneHeight = 1672
     private static var memoryGB: UInt64 { ProcessInfo.processInfo.physicalMemory / 1_073_741_824 }
