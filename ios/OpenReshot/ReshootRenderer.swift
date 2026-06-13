@@ -428,7 +428,11 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
             throw error
         }
 
-        let data = Data(bytes: readBuffer.contents(), count: bytesPerRow * height)
+        let data = Self.verticallyFlippedTextureData(
+            source: readBuffer.contents(),
+            bytesPerRow: bytesPerRow,
+            height: height
+        )
         guard let provider = CGDataProvider(data: data as CFData) else {
             throw NSError(domain: "OpenReshot", code: -2010, userInfo: [NSLocalizedDescriptionKey: "Failed to create export data provider"])
         }
@@ -448,6 +452,23 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
             throw NSError(domain: "OpenReshot", code: -2011, userInfo: [NSLocalizedDescriptionKey: "Failed to create export image"])
         }
         return UIImage(cgImage: cgImage, scale: 1, orientation: .up)
+    }
+
+    private static func verticallyFlippedTextureData(source: UnsafeMutableRawPointer, bytesPerRow: Int, height: Int) -> Data {
+        var flipped = Data(count: bytesPerRow * height)
+        flipped.withUnsafeMutableBytes { destination in
+            guard let destinationBase = destination.baseAddress else { return }
+            for row in 0..<height {
+                let sourceOffset = (height - 1 - row) * bytesPerRow
+                let destinationOffset = row * bytesPerRow
+                memcpy(
+                    destinationBase.advanced(by: destinationOffset),
+                    source.advanced(by: sourceOffset),
+                    bytesPerRow
+                )
+            }
+        }
+        return flipped
     }
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
