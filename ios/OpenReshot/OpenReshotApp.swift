@@ -3052,13 +3052,10 @@ struct ContentView: View {
 
     private func lensDock(width: CGFloat, scale: CGFloat) -> some View {
         VStack(spacing: 7 * scale) {
-            HStack(spacing: 7 * scale) {
-                Text("\(app.viewAngleMode.title) · \(lensFocusLabel) · \(lensFNumberLabel)")
-                    .font(.system(size: 10 * scale, weight: .semibold, design: .rounded))
-                    .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.70))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 6 * scale) {
+                ForEach(ReshotViewAngleMode.allCases) { mode in
+                    lensAngleModeButton(mode, scale: scale)
+                }
 
                 Button {
                     playDollyZoom()
@@ -3077,8 +3074,6 @@ struct ContentView: View {
                 .buttonStyle(FluidPressButtonStyle(pressedScale: 0.90))
                 .accessibilityLabel("复位镜头")
             }
-
-            lensAngleModeControl(scale: scale)
 
             lensValueSlider(
                 systemImage: "scope",
@@ -3129,38 +3124,29 @@ struct ContentView: View {
         .openReshotGlassPanel(cornerRadius: 22)
     }
 
-    private func lensAngleModeControl(scale: CGFloat) -> some View {
-        HStack(spacing: 7 * scale) {
-            HStack(spacing: 4 * scale) {
-                ForEach(ReshotViewAngleMode.allCases) { mode in
-                    let selected = app.viewAngleMode == mode
-                    Button {
-                        setLensViewAngleMode(mode)
-                    } label: {
-                        Text(mode.title)
-                            .font(.system(size: 9 * scale, weight: .bold, design: .rounded))
-                            .foregroundStyle(selected ? OpenReshotPalette.twilightText.opacity(0.92) : OpenReshotPalette.twilightText.opacity(0.56))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.82)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 24 * scale)
-                            .background(
-                                selected
-                                ? OpenReshotPalette.twilightText.opacity(0.17)
-                                : OpenReshotPalette.twilightText.opacity(0.055),
-                                in: Capsule()
-                            )
-                            .overlay(
-                                Capsule()
-                                    .strokeBorder(selected ? OpenReshotPalette.twilightAccent.opacity(0.38) : OpenReshotPalette.twilightText.opacity(0.055), lineWidth: 0.8)
-                            )
-                    }
-                    .buttonStyle(FluidPressButtonStyle(pressedScale: 0.96))
-                    .accessibilityLabel("切换到\(mode.title)视角")
-                }
-            }
+    private func lensAngleModeButton(_ mode: ReshotViewAngleMode, scale: CGFloat) -> some View {
+        let selected = app.viewAngleMode == mode
+        return Button {
+            setLensViewAngleMode(mode)
+        } label: {
+            Text(mode.title)
+                .font(.system(size: 8.5 * scale, weight: .bold, design: .rounded))
+                .foregroundStyle(selected ? OpenReshotPalette.twilightText.opacity(0.86) : OpenReshotPalette.twilightText.opacity(0.56))
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+                .frame(maxWidth: .infinity)
+                .frame(height: 40 * scale)
+                .background(
+                    selected ? OpenReshotPalette.twilightText.opacity(0.16) : OpenReshotPalette.twilightText.opacity(0.065),
+                    in: RoundedRectangle(cornerRadius: 12 * scale, style: .continuous)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12 * scale, style: .continuous)
+                        .strokeBorder(selected ? OpenReshotPalette.twilightAccent.opacity(0.36) : OpenReshotPalette.twilightText.opacity(0.06), lineWidth: 0.8)
+                )
         }
-        .frame(height: 24 * scale)
+        .buttonStyle(FluidPressButtonStyle(pressedScale: 0.96))
+        .accessibilityLabel("切换到\(mode.title)视角")
     }
 
     private func motionExportDock(width: CGFloat, scale: CGFloat) -> some View {
