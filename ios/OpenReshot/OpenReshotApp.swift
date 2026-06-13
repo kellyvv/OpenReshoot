@@ -3184,18 +3184,6 @@ struct ContentView: View {
                 ForEach(MotionExportFormat.allCases) { format in
                     motionExportFormatButton(format, scale: scale)
                 }
-
-                if app.motionExportState != .rendering {
-                    Button {
-                        withAnimation(.easeOut(duration: 0.18)) {
-                            motionExportMenuExpanded = false
-                        }
-                    } label: {
-                        dockIconButton(systemName: "xmark", scale: scale)
-                    }
-                    .buttonStyle(FluidPressButtonStyle(pressedScale: 0.90))
-                    .accessibilityLabel("关闭动效导出")
-                }
             }
 
             if app.motionExportState == .rendering {
