@@ -2472,12 +2472,7 @@ struct ContentView: View {
 
                 twilightPhotoStage(width: stageSize.width, height: stageSize.height)
                     .overlay(alignment: .bottom) {
-                        VStack(spacing: 8 * scale) {
-                            if phase == .compose, app.rendererReady, app.resultImage == nil {
-                                lensParameterChip(scale: scale)
-                            }
-                            photoStageCaption(phase: phase, scale: scale)
-                        }
+                        photoStageCaption(phase: phase, scale: scale)
                         .padding(.bottom, 12 * scale)
                     }
 
@@ -2782,7 +2777,42 @@ struct ContentView: View {
             }
             .buttonStyle(FluidPressButtonStyle(pressedScale: 0.94))
             .accessibilityLabel("换一张照片")
-            .offset(x: shutterMenuExpanded ? -88 * scale : 0, y: shutterMenuExpanded ? 0 : -2 * scale)
+            .offset(x: shutterMenuExpanded ? -132 * scale : 0, y: shutterMenuExpanded ? 0 : -2 * scale)
+            .scaleEffect(shutterMenuExpanded ? 1 : 0.24)
+            .opacity(shutterMenuExpanded ? 1 : 0)
+            .blur(radius: shutterMenuExpanded ? 0 : 5)
+            .allowsHitTesting(shutterMenuExpanded)
+
+            Button {
+                resetLensAndViewpoint()
+                withAnimation(.spring(response: 0.30, dampingFraction: 0.84)) {
+                    lensDockExpanded = false
+                    motionExportMenuExpanded = false
+                    showDragHint = false
+                }
+            } label: {
+                composeAuxiliaryButton(systemImage: "arrow.counterclockwise", title: "复位", scale: scale)
+            }
+            .buttonStyle(FluidPressButtonStyle(pressedScale: 0.94))
+            .accessibilityLabel("复位镜头")
+            .offset(x: shutterMenuExpanded ? -66 * scale : 0, y: shutterMenuExpanded ? 0 : -2 * scale)
+            .scaleEffect(shutterMenuExpanded ? 1 : 0.24)
+            .opacity(shutterMenuExpanded ? 1 : 0)
+            .blur(radius: shutterMenuExpanded ? 0 : 5)
+            .allowsHitTesting(shutterMenuExpanded)
+
+            Button {
+                withAnimation(.spring(response: 0.30, dampingFraction: 0.84)) {
+                    lensDockExpanded.toggle()
+                    motionExportMenuExpanded = false
+                    showDragHint = false
+                }
+            } label: {
+                composeAuxiliaryButton(systemImage: "camera.aperture", title: "镜头", scale: scale)
+            }
+            .buttonStyle(FluidPressButtonStyle(pressedScale: 0.94))
+            .accessibilityLabel(lensDockExpanded ? "收起镜头控制" : "打开镜头控制")
+            .offset(x: shutterMenuExpanded ? 66 * scale : 0, y: shutterMenuExpanded ? 0 : -2 * scale)
             .scaleEffect(shutterMenuExpanded ? 1 : 0.24)
             .opacity(shutterMenuExpanded ? 1 : 0)
             .blur(radius: shutterMenuExpanded ? 0 : 5)
@@ -2799,7 +2829,7 @@ struct ContentView: View {
             }
             .buttonStyle(FluidPressButtonStyle(pressedScale: 0.94))
             .accessibilityLabel(motionExportMenuExpanded ? "收起动效导出" : "打开动效导出")
-            .offset(x: shutterMenuExpanded ? 88 * scale : 0, y: shutterMenuExpanded ? 0 : -2 * scale)
+            .offset(x: shutterMenuExpanded ? 132 * scale : 0, y: shutterMenuExpanded ? 0 : -2 * scale)
             .scaleEffect(shutterMenuExpanded ? 1 : 0.24)
             .opacity(shutterMenuExpanded ? 1 : 0)
             .blur(radius: shutterMenuExpanded ? 0 : 5)
@@ -2947,42 +2977,6 @@ struct ContentView: View {
                 .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.52))
         }
         .frame(width: 54 * scale, height: 66 * scale)
-    }
-
-    private func lensParameterChip(scale: CGFloat) -> some View {
-        Button {
-            withAnimation(.spring(response: 0.30, dampingFraction: 0.84)) {
-                lensDockExpanded.toggle()
-                motionExportMenuExpanded = false
-                showDragHint = false
-            }
-        } label: {
-            HStack(spacing: 7 * scale) {
-                Image(systemName: "camera.aperture")
-                    .font(.system(size: 11 * scale, weight: .semibold))
-                    .symbolRenderingMode(.hierarchical)
-
-                Text("\(app.viewAngleMode.title) · \(lensFocusLabel) · \(lensFNumberLabel)")
-                    .font(.system(size: 10 * scale, weight: .bold, design: .rounded))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.86)
-            }
-            .foregroundStyle(OpenReshotPalette.twilightText.opacity(lensDockExpanded ? 0.92 : 0.72))
-            .padding(.horizontal, 12 * scale)
-            .frame(height: 30 * scale)
-            .background(OpenReshotPalette.twilightBottom.opacity(0.52), in: Capsule())
-            .overlay(
-                Capsule()
-                    .strokeBorder(
-                        lensDockExpanded ? OpenReshotPalette.twilightAccent.opacity(0.72) : OpenReshotPalette.twilightText.opacity(0.16),
-                        lineWidth: 1
-                    )
-            )
-            .shadow(color: .black.opacity(0.22), radius: 12, y: 6)
-            .contentShape(Capsule())
-        }
-        .buttonStyle(FluidPressButtonStyle(pressedScale: 0.90))
-        .accessibilityLabel(lensDockExpanded ? "收起镜头控制" : "打开镜头控制")
     }
 
     private func resetPhotoViewpoint() {
@@ -3150,12 +3144,7 @@ struct ContentView: View {
         .padding(.horizontal, 12 * scale)
         .padding(.vertical, 11 * scale)
         .frame(width: width)
-        .background(OpenReshotPalette.twilightBottom.opacity(0.58), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(OpenReshotPalette.twilightText.opacity(0.13), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.30), radius: 16, y: 8)
+        .openReshotGlassPanel(cornerRadius: 8)
     }
 
     private func lensAngleModeControl(scale: CGFloat) -> some View {
@@ -3251,12 +3240,7 @@ struct ContentView: View {
         .padding(.horizontal, 12 * scale)
         .padding(.vertical, 11 * scale)
         .frame(width: width)
-        .background(OpenReshotPalette.twilightBottom.opacity(0.58), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(OpenReshotPalette.twilightText.opacity(0.13), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.30), radius: 16, y: 8)
+        .openReshotGlassPanel(cornerRadius: 8)
     }
 
     private func motionExportFormatButton(_ format: MotionExportFormat, scale: CGFloat) -> some View {
@@ -4194,6 +4178,36 @@ struct ContentView: View {
             .foregroundStyle(foreground.opacity(0.90))
             .frame(width: 44, height: 44)
             .contentShape(Rectangle())
+    }
+}
+
+private struct OpenReshotGlassPanelModifier: ViewModifier {
+    let cornerRadius: CGFloat
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        if #available(iOS 26.0, *) {
+            content
+                .glassEffect(.regular.interactive(), in: shape)
+                .overlay(
+                    shape.strokeBorder(OpenReshotPalette.twilightText.opacity(0.16), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.28), radius: 18, y: 9)
+        } else {
+            content
+                .background(OpenReshotPalette.twilightBottom.opacity(0.58), in: shape)
+                .overlay(
+                    shape.strokeBorder(OpenReshotPalette.twilightText.opacity(0.13), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.30), radius: 16, y: 8)
+        }
+    }
+}
+
+private extension View {
+    func openReshotGlassPanel(cornerRadius: CGFloat) -> some View {
+        modifier(OpenReshotGlassPanelModifier(cornerRadius: cornerRadius))
     }
 }
 
