@@ -3167,32 +3167,22 @@ struct ContentView: View {
     }
 
     private func motionExportDock(width: CGFloat, scale: CGFloat) -> some View {
-        VStack(spacing: 8 * scale) {
-            HStack(spacing: 7 * scale) {
-                dockGlyph(systemName: "livephoto", scale: scale)
-
-                Spacer(minLength: 8 * scale)
-
-                Text("动效 · \(app.viewAngleMode.title)")
-                    .font(.system(size: 10 * scale, weight: .semibold, design: .rounded))
-                    .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.70))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
-
-                Button {
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        motionExportMenuExpanded = false
-                    }
-                } label: {
-                    dockIconButton(systemName: "xmark", scale: scale)
-                }
-                .buttonStyle(FluidPressButtonStyle(pressedScale: 0.90))
-                .accessibilityLabel("关闭动效导出")
-            }
-
+        VStack(spacing: 7 * scale) {
             HStack(spacing: 6 * scale) {
                 ForEach(MotionExportFormat.allCases) { format in
                     motionExportFormatButton(format, scale: scale)
+                }
+
+                if app.motionExportState != .rendering {
+                    Button {
+                        withAnimation(.easeOut(duration: 0.18)) {
+                            motionExportMenuExpanded = false
+                        }
+                    } label: {
+                        dockIconButton(systemName: "xmark", scale: scale)
+                    }
+                    .buttonStyle(FluidPressButtonStyle(pressedScale: 0.90))
+                    .accessibilityLabel("关闭动效导出")
                 }
             }
 
@@ -3217,17 +3207,17 @@ struct ContentView: View {
         } label: {
             VStack(spacing: 5 * scale) {
                 Image(systemName: motionExportIcon(for: format))
-                    .font(.system(size: 13 * scale, weight: .semibold))
+                    .font(.system(size: 12.5 * scale, weight: .semibold))
                     .symbolRenderingMode(.hierarchical)
 
                 Text(motionExportTitle(for: format))
-                    .font(.system(size: 9 * scale, weight: .bold, design: .rounded))
+                    .font(.system(size: 8.5 * scale, weight: .bold, design: .rounded))
                     .lineLimit(1)
                     .minimumScaleFactor(0.78)
             }
             .foregroundStyle(enabled || active ? OpenReshotPalette.twilightText.opacity(0.76) : OpenReshotPalette.twilightText.opacity(0.26))
             .frame(maxWidth: .infinity)
-            .frame(height: 46 * scale)
+            .frame(height: 40 * scale)
             .background(
                 active ? OpenReshotPalette.twilightText.opacity(0.16) : OpenReshotPalette.twilightText.opacity(enabled ? 0.065 : 0.03),
                 in: RoundedRectangle(cornerRadius: 12 * scale, style: .continuous)
