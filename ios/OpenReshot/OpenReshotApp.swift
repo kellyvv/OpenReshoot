@@ -3718,7 +3718,7 @@ struct ContentView: View {
                     .allowsHitTesting(false)
             }
 
-            if app.reconstructingScene {
+            if app.reconstructingScene || app.loadingPreviewScene {
                 reconstructionOverlay
                     .transition(.opacity.animation(.easeInOut(duration: 0.28)))
             }
