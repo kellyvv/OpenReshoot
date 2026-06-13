@@ -10,6 +10,7 @@ import ImageIO
 import Vision
 import simd
 import SplatIO
+import CryptoKit
 
 @main
 struct OpenReshotApp: App {
@@ -92,6 +93,166 @@ private struct PreviewExportMetadata: Codable, Sendable {
     let splatFileName: String
 }
 
+struct ReshotCacheItem: Codable, Identifiable, Equatable {
+    let id: String
+    let formatVersion: Int
+    let createdAt: Date
+    let sourceSignature: String
+    let quality: String
+    let splatCount: Int
+    let focus: Float
+    let focalPixels: Float
+    let width: Int
+    let height: Int
+    let sourceImageName: String
+    let thumbnailImageName: String
+    let splatFileName: String
+}
+
+private enum ReshotCacheStore {
+    private static let folderName = "ReshotCache"
+    private static let metadataFileName = "Reshot.json"
+
+    static func loadItems() -> [ReshotCacheItem] {
+        guard let root = try? rootDirectory(create: false),
+              let urls = try? FileManager.default.contentsOfDirectory(
+                at: root,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+              ) else {
+            return []
+        }
+
+        return urls.compactMap { directory -> ReshotCacheItem? in
+            guard (try? directory.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { return nil }
+            let metadataURL = directory.appendingPathComponent(metadataFileName)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            guard let data = try? Data(contentsOf: metadataURL),
+                  let item = try? decoder.decode(ReshotCacheItem.self, from: data) else {
+                return nil
+            }
+            return item
+        }
+        .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    static func item(matching sourceSignature: String, quality: RenderQuality) -> ReshotCacheItem? {
+        let items = loadItems().filter { $0.sourceSignature == sourceSignature }
+        return items.first { $0.quality == quality.rawValue } ?? items.first
+    }
+
+    static func sourceURL(for item: ReshotCacheItem) -> URL? {
+        cacheDirectory(for: item)?.appendingPathComponent(item.sourceImageName)
+    }
+
+    static func thumbnailURL(for item: ReshotCacheItem) -> URL? {
+        cacheDirectory(for: item)?.appendingPathComponent(item.thumbnailImageName)
+    }
+
+    static func splatURL(for item: ReshotCacheItem) -> URL? {
+        cacheDirectory(for: item)?.appendingPathComponent(item.splatFileName)
+    }
+
+    static func delete(_ item: ReshotCacheItem) throws {
+        guard let directory = cacheDirectory(for: item) else { return }
+        try FileManager.default.removeItem(at: directory)
+    }
+
+    static func save(
+        points: [SplatPoint],
+        sourceImage: UIImage,
+        sourceSignature: String,
+        quality: RenderQuality,
+        focus: Float,
+        focalPixels: Float,
+        width: Int,
+        height: Int
+    ) async throws -> ReshotCacheItem {
+        try await Task.detached(priority: .utility) {
+            let id = "\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.prefix(8))"
+            let sourceImageName = "source.jpg"
+            let thumbnailImageName = "thumb.jpg"
+            let splatFileName = "scene.ply"
+            let item = ReshotCacheItem(
+                id: id,
+                formatVersion: 1,
+                createdAt: Date(),
+                sourceSignature: sourceSignature,
+                quality: quality.rawValue,
+                splatCount: points.count,
+                focus: focus,
+                focalPixels: focalPixels,
+                width: width,
+                height: height,
+                sourceImageName: sourceImageName,
+                thumbnailImageName: thumbnailImageName,
+                splatFileName: splatFileName
+            )
+
+            let root = try rootDirectory(create: true)
+            let finalDirectory = root.appendingPathComponent(id, isDirectory: true)
+            let temporaryDirectory = root.appendingPathComponent(".\(id)-writing", isDirectory: true)
+            let fileManager = FileManager.default
+            try? fileManager.removeItem(at: temporaryDirectory)
+            try fileManager.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+
+            guard let sourceData = sourceImage.jpegData(compressionQuality: 0.94),
+                  let thumbnailData = thumbnailImage(from: sourceImage).jpegData(compressionQuality: 0.82) else {
+                throw err("缓存图片编码失败")
+            }
+            try sourceData.write(to: temporaryDirectory.appendingPathComponent(sourceImageName), options: [.atomic])
+            try thumbnailData.write(to: temporaryDirectory.appendingPathComponent(thumbnailImageName), options: [.atomic])
+
+            let plyURL = temporaryDirectory.appendingPathComponent(splatFileName)
+            let writer = try SplatPLYSceneWriter(toFileAtPath: plyURL.path)
+            try await writer.start(sphericalHarmonicDegree: 0, binary: true, pointCount: points.count)
+            try await writer.write(points)
+            try await writer.close()
+
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            encoder.dateEncodingStrategy = .iso8601
+            try encoder.encode(item).write(to: temporaryDirectory.appendingPathComponent(metadataFileName), options: [.atomic])
+
+            try? fileManager.removeItem(at: finalDirectory)
+            try fileManager.moveItem(at: temporaryDirectory, to: finalDirectory)
+            return item
+        }.value
+    }
+
+    private static func rootDirectory(create: Bool) throws -> URL {
+        let base = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let root = base.appendingPathComponent(folderName, isDirectory: true)
+        if create {
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        }
+        return root
+    }
+
+    private static func cacheDirectory(for item: ReshotCacheItem) -> URL? {
+        try? rootDirectory(create: false).appendingPathComponent(item.id, isDirectory: true)
+    }
+
+    private static func thumbnailImage(from image: UIImage) -> UIImage {
+        let maxSide: CGFloat = 420
+        let longest = max(image.size.width, image.size.height, 1)
+        let scale = min(1, maxSide / longest)
+        let targetSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: targetSize, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: targetSize))
+        }
+    }
+}
+
 /// Holds the model + renderer and drives reconstruction off the main thread.
 final class AppState: ObservableObject {
     @Published var status = ""
@@ -116,6 +277,12 @@ final class AppState: ObservableObject {
     @Published var subjectProtectionMask: UIImage?
     @Published var geminiKey: String
     @Published var hasExportablePreview = false
+    @Published var lensFocusDepth: Float = 1
+    @Published var lensFocusMin: Float = 0.25
+    @Published var lensFocusMax: Float = 4
+    @Published var lensFNumber: Float = 16
+    @Published var lensDolly: Float = 0
+    @Published var galleryItems: [ReshotCacheItem] = []
     let modelStore = ReconstructionModelStore()
     var renderer: ReshootRenderer?
     private let modelQueue = DispatchQueue(label: "OpenReshot.model", qos: .userInitiated)
@@ -128,9 +295,12 @@ final class AppState: ObservableObject {
     private var enhanceTask: Task<Void, Never>?
     private var currentCloudPoints: [SplatPoint]?
     private var currentPreviewMetadata: PreviewExportMetadata?
+    private var activeCacheItemID: String?
+    private var pendingCachedReshot: ReshotCacheItem?
     private var demoScenePending = false
     private var didLoadDemoScene = false
     private var didStartDemoModelPrefetch = false
+    private var lensDefaultFocusDepth: Float = 1
     private static let geminiInputMaxSide: CGFloat = 1024
     private static let geminiModel = "gemini-3.1-flash-image"
     private static let demoSceneResource = "DemoFLOW"
@@ -142,15 +312,16 @@ final class AppState: ObservableObject {
     private static let enhancePrompt = """
     This image is a novel-view render produced from a 3D Gaussian Splatting reconstruction. Because the camera viewpoint changed, some newly exposed edges, disoccluded regions, stretched areas, warped details, holes, and blurry splat artifacts may appear.
 
-    Repair only those rendering artifacts. Fill missing or extended areas with realistic detail consistent with the surrounding scene and the original photo. Keep the original subject, layout, camera framing, lighting, colors, materials, and composition unchanged. Do not restyle, beautify, replace, or add new main objects.
+    Repair only those rendering artifacts. Turn blurry splat regions into clear, coherent details. Correct warped, stretched, distorted, or wrong-looking areas, and complete any missing, exposed, or broken parts with realistic detail consistent with the surrounding scene and the original photo. Clarify the composition while keeping the same camera framing, perspective, subject placement, lighting, colors, materials, and overall layout. Do not restyle, beautify, replace, or add new main objects.
 
     If people are visible, preserve them exactly as shown: same identity, appearance, hair, clothing, pose, expression, and framing. Do not alter people or create any new person.
 
-    Output one single complete clear photo. 这是 3DGS 新视角渲染结果，只修复模糊、拉伸、露底、空洞和缺失区域；如果画面里有人，人物必须保持原样。
+    Output one single complete sharp and clear photo. 这是 3DGS 新视角渲染结果，把模糊区域变清晰，把拉伸、变形、错误、露底、空洞、缺失和破碎区域修正并补齐，对构图进行清晰化处理，但保持原主体、视角、透视、布局、光线和颜色不变；如果画面里有人，人物必须保持原样。
     """
 
     init() {
         geminiKey = UserDefaults.standard.string(forKey: "OpenReshot.geminiKey") ?? ""
+        galleryItems = ReshotCacheStore.loadItems()
         memoryWarningObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification,
             object: nil,
@@ -181,7 +352,18 @@ final class AppState: ObservableObject {
             self.processFailureKind = nil
             self.status = ""
         }
+        renderer.onFailure = { [weak self] message in
+            guard let self, self.inputImage != nil else { return }
+            self.loadingPreviewScene = false
+            self.reconstructingScene = false
+            self.rendererReady = false
+            self.processFailed = true
+            self.processFailureKind = .imageLoad
+            self.status = ""
+            print("❌ [OpenReshot] renderer scene load failed: \(message)")
+        }
         startPendingDemoSceneIfPossible()
+        startPendingCachedReshotIfPossible()
     }
 
     @MainActor
@@ -201,6 +383,8 @@ final class AppState: ObservableObject {
         activeTaskID = taskID
         reconstructionRequestID = taskID
         subjectMaskRequestID = taskID
+        activeCacheItemID = nil
+        pendingCachedReshot = nil
         enhanceTask?.cancel()
         enhanceTask = nil
         renderer?.clearCloud()
@@ -208,6 +392,7 @@ final class AppState: ObservableObject {
         currentCloudPoints = nil
         currentPreviewMetadata = nil
         hasExportablePreview = false
+        resetLensControls(focus: Self.demoSceneFocus)
         inputImage = image
         imageAspect = max(0.1, CGFloat(Self.demoSceneWidth) / CGFloat(Self.demoSceneHeight))
         hasCloud = false
@@ -269,9 +454,19 @@ final class AppState: ObservableObject {
         let displayImage = SharpModel.normalized(image)
         let requestID = taskID ?? UUID()
         let hasInstalledModel = modelStore.activeModelURL() != nil
+        let selectedQuality = quality
+        let sourceSignature = Self.sourceSignature(for: displayImage)
+        if let sourceSignature,
+           let cachedItem = ReshotCacheStore.item(matching: sourceSignature, quality: selectedQuality) {
+            print("♻️ [OpenReshot] loading cached reconstruction \(cachedItem.id)")
+            loadCachedReshot(cachedItem, sourceOverride: displayImage, sourceData: sourceData, taskID: requestID)
+            return
+        }
         activeTaskID = requestID
         reconstructionRequestID = requestID
         currentSourceData = sourceData
+        activeCacheItemID = nil
+        pendingCachedReshot = nil
         enhanceTask?.cancel()
         enhanceTask = nil
         renderer?.clearCloud()
@@ -304,7 +499,6 @@ final class AppState: ObservableObject {
             print("⚠️ [OpenReshot] reconstruction model missing; prompting download")
             return
         }
-        let selectedQuality = quality
         modelQueue.async { [weak self] in
             guard let self else { return }
             do {
@@ -323,6 +517,7 @@ final class AppState: ObservableObject {
                     if self.renderer == nil { print("❌ [OpenReshot] renderer is nil (Metal init failed)") }
                     self.renderer?.setCloud(g, focus: focus,
                                             fpx: out.fpx, width: out.width, height: out.height)
+                    self.resetLensControls(focus: focus)
                     self.hasCloud = true
                     self.currentCloudPoints = g
                     self.currentPreviewMetadata = PreviewExportMetadata(
@@ -338,6 +533,19 @@ final class AppState: ObservableObject {
                     )
                     self.hasExportablePreview = true
                     self.status = ""
+                    if let sourceSignature {
+                        self.persistReshotCache(
+                            points: g,
+                            sourceImage: displayImage,
+                            sourceSignature: sourceSignature,
+                            quality: selectedQuality,
+                            focus: focus,
+                            focalPixels: out.fpx,
+                            width: out.width,
+                            height: out.height,
+                            taskID: requestID
+                        )
+                    }
                 }
             } catch {
                 print("❌ [OpenReshot] reconstruct error: \(error)")
@@ -401,6 +609,29 @@ final class AppState: ObservableObject {
     }
 
     @MainActor
+    func refreshGallery() {
+        galleryItems = ReshotCacheStore.loadItems()
+    }
+
+    @MainActor
+    func openCachedReshot(_ item: ReshotCacheItem) {
+        loadCachedReshot(item)
+    }
+
+    @MainActor
+    func deleteCachedReshot(_ item: ReshotCacheItem) {
+        do {
+            try ReshotCacheStore.delete(item)
+            galleryItems.removeAll { $0.id == item.id }
+            if activeCacheItemID == item.id {
+                resetSession()
+            }
+        } catch {
+            print("❌ [OpenReshot] delete cached reconstruction error: \(error)")
+        }
+    }
+
+    @MainActor
     func exportCurrentPreviewPackage() async throws -> [URL] {
         guard let points = currentCloudPoints,
               let metadata = currentPreviewMetadata,
@@ -422,6 +653,34 @@ final class AppState: ObservableObject {
         sheenAmount = min(1, CGFloat(simd_length(tilt)))
         sheenTiltX = CGFloat(tilt.x)
         sheenTiltY = CGFloat(tilt.y)
+    }
+
+    @MainActor
+    func setLensFocusDepth(_ depth: Float) {
+        lensFocusDepth = min(max(depth, lensFocusMin), lensFocusMax)
+        lensDolly = min(max(lensDolly, lensDollyRange.lowerBound), lensDollyRange.upperBound)
+        if lensFNumber >= 15.9 {
+            lensFNumber = 4
+        }
+        renderer?.setLens(focusDepth: lensFocusDepth, fNumber: lensFNumber, dolly: lensDolly)
+    }
+
+    @MainActor
+    func setLensFNumber(_ value: Float) {
+        lensFNumber = min(max(value, 1.4), 16)
+        renderer?.setLens(fNumber: lensFNumber)
+    }
+
+    @MainActor
+    func setLensDolly(_ value: Float) {
+        lensDolly = min(max(value, lensDollyRange.lowerBound), lensDollyRange.upperBound)
+        renderer?.setLens(dolly: lensDolly)
+    }
+
+    @MainActor
+    func resetLensControlsToDefault() {
+        let focus = min(max(lensDefaultFocusDepth, lensFocusMin), lensFocusMax)
+        resetLensControls(focus: focus)
     }
 
     @MainActor
@@ -513,11 +772,14 @@ final class AppState: ObservableObject {
         enhanceTask = nil
         renderer?.clearCloud()
         demoScenePending = false
+        pendingCachedReshot = nil
+        activeCacheItemID = nil
         previewMode = false
         loadingPreviewScene = false
         currentCloudPoints = nil
         currentPreviewMetadata = nil
         hasExportablePreview = false
+        resetLensControls(focus: 1)
         status = ""
         hasCloud = false
         rendererReady = false
@@ -554,14 +816,116 @@ final class AppState: ObservableObject {
             return
         }
 
-        demoScenePending = false
         loadingPreviewScene = true
-        renderer.setCloud(from: sceneURL,
-                          focus: Self.demoSceneFocus,
-                          fpx: Self.demoSceneFocalPixels,
-                          width: Self.demoSceneWidth,
-                          height: Self.demoSceneHeight)
+        let didStart = renderer.setCloud(from: sceneURL,
+                                         focus: Self.demoSceneFocus,
+                                         fpx: Self.demoSceneFocalPixels,
+                                         width: Self.demoSceneWidth,
+                                         height: Self.demoSceneHeight)
+        guard didStart else { return }
+        demoScenePending = false
+        resetLensControls(focus: Self.demoSceneFocus)
         hasCloud = true
+    }
+
+    @MainActor
+    private func loadCachedReshot(
+        _ item: ReshotCacheItem,
+        sourceOverride: UIImage? = nil,
+        sourceData: Data? = nil,
+        taskID: UUID = UUID()
+    ) {
+        guard let sourceURL = ReshotCacheStore.sourceURL(for: item),
+              let sourceImage = sourceOverride ?? UIImage(contentsOfFile: sourceURL.path) else {
+            processFailed = true
+            processFailureKind = .imageLoad
+            print("❌ [OpenReshot] cached source missing for \(item.id)")
+            refreshGallery()
+            return
+        }
+
+        activeTaskID = taskID
+        reconstructionRequestID = taskID
+        subjectMaskRequestID = taskID
+        activeCacheItemID = item.id
+        pendingCachedReshot = item
+        currentSourceData = sourceData ?? (try? Data(contentsOf: sourceURL))
+        enhanceTask?.cancel()
+        enhanceTask = nil
+        renderer?.clearCloud()
+        demoScenePending = false
+        previewMode = false
+        loadingPreviewScene = true
+        reconstructingScene = false
+        reconstructingFrame = false
+        processFailed = false
+        processFailureKind = nil
+        currentCloudPoints = nil
+        currentPreviewMetadata = nil
+        hasExportablePreview = false
+        inputImage = sourceImage
+        imageAspect = max(0.1, CGFloat(item.width) / CGFloat(max(item.height, 1)))
+        hasCloud = false
+        rendererReady = false
+        sheenAmount = 0
+        sheenTiltX = 0
+        sheenTiltY = 0
+        motionTilt = .zero
+        capturedFrame = nil
+        resultImage = nil
+        saveState = .idle
+        subjectProtectionMask = nil
+        status = ""
+        resetLensControls(focus: item.focus)
+        updateSubjectProtectionMask(for: sourceImage, requestID: taskID)
+        startPendingCachedReshotIfPossible()
+    }
+
+    @MainActor
+    private func startPendingCachedReshotIfPossible() {
+        guard let item = pendingCachedReshot, let renderer else { return }
+        guard let splatURL = ReshotCacheStore.splatURL(for: item) else {
+            pendingCachedReshot = nil
+            loadingPreviewScene = false
+            processFailed = true
+            processFailureKind = .imageLoad
+            print("❌ [OpenReshot] cached PLY missing for \(item.id)")
+            refreshGallery()
+            return
+        }
+
+        loadingPreviewScene = true
+        let didStart = renderer.setCloud(from: splatURL,
+                                         focus: item.focus,
+                                         fpx: item.focalPixels,
+                                         width: item.width,
+                                         height: item.height)
+        guard didStart else { return }
+        pendingCachedReshot = nil
+        resetLensControls(focus: item.focus)
+        hasCloud = true
+    }
+
+    @MainActor
+    private func resetLensControls(focus: Float) {
+        let safeFocus = max(0.08, focus)
+        lensDefaultFocusDepth = safeFocus
+        lensFocusMin = max(0.05, safeFocus * 0.35)
+        lensFocusMax = max(lensFocusMin + 0.25, safeFocus * 2.6)
+        lensFocusDepth = min(max(safeFocus, lensFocusMin), lensFocusMax)
+        // Default preview must stay sharp; f/16 disables the DOF shader blur.
+        lensFNumber = 16
+        lensDolly = 0
+        renderer?.setLens(focusDepth: lensFocusDepth, fNumber: lensFNumber, dolly: lensDolly)
+    }
+
+    private var maxForwardLensDolly: Float {
+        min(0.8, max(0, lensFocusDepth - 0.08))
+    }
+
+    var lensDollyRange: ClosedRange<Float> {
+        let backward = -min(0.8, max(0.08, lensFocusDepth * 0.40))
+        return backward...maxForwardLensDolly
     }
 
     @MainActor
@@ -599,6 +963,48 @@ final class AppState: ObservableObject {
             try encoder.encode(metadata).write(to: jsonURL, options: [.atomic])
             return [plyURL, imageURL, jsonURL]
         }.value
+    }
+
+    private func persistReshotCache(
+        points: [SplatPoint],
+        sourceImage: UIImage,
+        sourceSignature: String,
+        quality: RenderQuality,
+        focus: Float,
+        focalPixels: Float,
+        width: Int,
+        height: Int,
+        taskID: UUID
+    ) {
+        Task { [weak self, points, sourceImage, sourceSignature, quality] in
+            do {
+                let item = try await ReshotCacheStore.save(
+                    points: points,
+                    sourceImage: sourceImage,
+                    sourceSignature: sourceSignature,
+                    quality: quality,
+                    focus: focus,
+                    focalPixels: focalPixels,
+                    width: width,
+                    height: height
+                )
+                await MainActor.run {
+                    guard self?.activeTaskID == taskID else { return }
+                    self?.activeCacheItemID = item.id
+                    self?.galleryItems.removeAll { $0.id == item.id }
+                    self?.galleryItems.insert(item, at: 0)
+                    print("💾 [OpenReshot] cached reconstruction \(item.id)")
+                }
+            } catch {
+                print("⚠️ [OpenReshot] cache write failed: \(error)")
+            }
+        }
+    }
+
+    private static func sourceSignature(for image: UIImage) -> String? {
+        guard let data = image.pngData() else { return nil }
+        let digest = SHA256.hash(data: data)
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 
     @MainActor
@@ -1099,7 +1505,9 @@ struct ContentView: View {
     @State private var showingPhotoPicker = false
     @State private var glowSpin = false
     @State private var showingSettings = false
+    @State private var showingGallery = false
     @State private var comparingResult = false
+    @State private var comparisonWipePosition: CGFloat = 0.5
     @State private var generationStartedAt = Date()
     @State private var resultFlash = false
     @State private var saveToastVisible = false
@@ -1111,6 +1519,9 @@ struct ContentView: View {
     @State private var frameStartPending = false
     @State private var resultMenuExpanded = false
     @State private var resultReplacementPending = false
+    @State private var lensDockExpanded = false
+    @State private var dollyZoomTask: Task<Void, Never>?
+    @State private var dollyZoomRunning = false
     @State private var focusGeminiKeyWhenSettingsOpen = false
     private let toolbarHeight: CGFloat = 88
 
@@ -1128,6 +1539,7 @@ struct ContentView: View {
         }
         .onAppear {
             glowSpin = true
+            app.refreshGallery()
             // Headless self-test: launch with `-autotest` to run the bundled image, no UI taps.
             if ProcessInfo.processInfo.arguments.contains("-autotest"),
                let url = Bundle.main.url(forResource: "koala", withExtension: "png"),
@@ -1146,6 +1558,7 @@ struct ContentView: View {
             showDragHint = false
             saveToastVisible = false
             comparingResult = false
+            comparisonWipePosition = 0.5
             shutterMenuExpanded = false
             resultMenuExpanded = false
             frameStartPending = false
@@ -1179,24 +1592,33 @@ struct ContentView: View {
         .onChange(of: app.reconstructingFrame) { _, isGenerating in
             if isGenerating {
                 showDragHint = false
+                lensDockExpanded = false
+                cancelDollyZoom(reset: false)
                 resultMenuExpanded = false
                 generationStartedAt = Date()
             }
         }
         .onChange(of: app.rendererReady) { _, ready in
-            guard ready, app.inputImage != nil else { return }
+            guard ready, app.inputImage != nil else {
+                lensDockExpanded = false
+                cancelDollyZoom(reset: true)
+                return
+            }
             revealShutterMenuAfterReconstruction()
             revealDragHintAfterRendererReady()
         }
         .onChange(of: app.resultImage) { _, image in
             guard image != nil else {
                 comparingResult = false
+                comparisonWipePosition = 0.5
                 resultMenuExpanded = false
                 resultReplacementPending = false
                 return
             }
             showDragHint = false
             shutterMenuExpanded = false
+            lensDockExpanded = false
+            cancelDollyZoom(reset: false)
             resultMenuExpanded = false
             resultFlash = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
@@ -1216,11 +1638,19 @@ struct ContentView: View {
                 }
             }
         }
+        .onDisappear {
+            cancelDollyZoom(reset: true)
+        }
         .sheet(isPresented: $showingSettings) {
             SettingsView(app: app, focusGeminiKeyOnAppear: focusGeminiKeyWhenSettingsOpen)
                 .onDisappear {
                     focusGeminiKeyWhenSettingsOpen = false
                 }
+        }
+        .sheet(isPresented: $showingGallery) {
+            ReshotGalleryView(app: app) { item in
+                openCachedGalleryItem(item)
+            }
         }
         .photosPicker(isPresented: $showingPhotoPicker, selection: $pickerItem, matching: .images)
         .tint(OpenReshotPalette.accent)
@@ -1292,7 +1722,35 @@ struct ContentView: View {
     private func emptyHomeSettingsButton(size: CGSize, scale: CGFloat) -> some View {
         VStack {
             HStack {
+                Button {
+                    app.refreshGallery()
+                    showingGallery = true
+                } label: {
+                    HStack(spacing: 6 * scale) {
+                        Image(systemName: "photo.stack")
+                            .font(.system(size: 12 * scale, weight: .semibold))
+
+                        Text("空间画廊")
+                            .font(.system(size: 11 * scale, weight: .semibold, design: .rounded))
+                            .tracking(0.6)
+                    }
+                    .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.58))
+                    .padding(.horizontal, 12 * scale)
+                    .frame(height: 34 * scale)
+                    .background(OpenReshotPalette.twilightBottom.opacity(0.42), in: Capsule())
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(OpenReshotPalette.twilightText.opacity(0.10), lineWidth: 1)
+                    )
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(FluidPressButtonStyle(pressedScale: 0.92))
+                .accessibilityLabel("打开空间画廊")
+                .padding(.leading, 22)
+                .padding(.top, 13 * scale)
+
                 Spacer()
+
                 Button {
                     openSettings()
                 } label: {
@@ -1467,6 +1925,16 @@ struct ContentView: View {
 
             bottomActionLayer(size: size, scale: scale) {
                 flowBottomAction(phase: phase, scale: scale)
+            }
+
+            if lensDockExpanded, phase == .compose, app.rendererReady, app.resultImage == nil {
+                lensDock(width: max(1, min(stageSize.width - 24 * scale, 318 * scale)), scale: scale)
+                    .position(x: size.width / 2, y: max(photoTopInset + 84 * scale, bottomActionTop - 102 * scale))
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .scale(scale: 0.96)).animation(.spring(response: 0.30, dampingFraction: 0.84)),
+                        removal: .opacity.animation(.easeOut(duration: 0.18))
+                    ))
+                    .zIndex(6)
             }
 
             if saveToastVisible {
@@ -1719,6 +2187,22 @@ struct ContentView: View {
         showingSettings = true
     }
 
+    private func openCachedGalleryItem(_ item: ReshotCacheItem) {
+        frameStartPending = false
+        resultReplacementPending = false
+        resultMenuExpanded = false
+        shutterMenuExpanded = false
+        lensDockExpanded = false
+        showDragHint = false
+        saveToastVisible = false
+        comparingResult = false
+        comparisonWipePosition = 0.5
+        dragBaseTilt = .zero
+        cancelDollyZoom(reset: true)
+        pickerItem = nil
+        app.openCachedReshot(item)
+    }
+
     private func composeActionRow(scale: CGFloat) -> some View {
         ZStack {
             Button {
@@ -1735,12 +2219,15 @@ struct ContentView: View {
             .allowsHitTesting(shutterMenuExpanded)
 
             Button {
-                resetPhotoViewpoint()
+                withAnimation(.spring(response: 0.30, dampingFraction: 0.84)) {
+                    lensDockExpanded.toggle()
+                    showDragHint = false
+                }
             } label: {
-                composeAuxiliaryButton(systemImage: "scope", title: "回正", scale: scale)
+                composeAuxiliaryButton(systemImage: "camera.aperture", title: "镜头", scale: scale)
             }
             .buttonStyle(FluidPressButtonStyle(pressedScale: 0.94))
-            .accessibilityLabel("回正视角")
+            .accessibilityLabel(lensDockExpanded ? "收起镜头控制" : "打开镜头控制")
             .offset(x: shutterMenuExpanded ? 88 * scale : 0, y: shutterMenuExpanded ? 0 : -2 * scale)
             .scaleEffect(shutterMenuExpanded ? 1 : 0.24)
             .opacity(shutterMenuExpanded ? 1 : 0)
@@ -1812,7 +2299,9 @@ struct ContentView: View {
         generationStartedAt = Date()
         withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
             shutterMenuExpanded = false
+            lensDockExpanded = false
         }
+        cancelDollyZoom(reset: false)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
             guard frameStartPending else { return }
             app.reconstructCurrentFrame()
@@ -1850,6 +2339,8 @@ struct ContentView: View {
         photoLoadTask = nil
         app.cancelCurrentTaskAndClear()
         showDragHint = false
+        lensDockExpanded = false
+        cancelDollyZoom(reset: true)
         saveToastVisible = false
         comparingResult = false
         dragBaseTilt = .zero
@@ -1887,6 +2378,264 @@ struct ContentView: View {
         dragBaseTilt = .zero
         app.renderer?.setTiltTarget(.zero)
         app.updateSheen(for: .zero)
+    }
+
+    private func resetLensAndViewpoint() {
+        cancelDollyZoom(reset: true)
+        resetPhotoViewpoint()
+        app.resetLensControlsToDefault()
+    }
+
+    private func playDollyZoom() {
+        guard !dollyZoomRunning else { return }
+        cancelDollyZoom(reset: false)
+        let focusDepth = max(app.lensFocusDepth, 0.1)
+        let forward = min(0.58, max(0.12, focusDepth * 0.30), max(0.05, focusDepth - 0.10))
+        let backward = -min(0.32, max(0.08, focusDepth * 0.16))
+
+        dollyZoomRunning = true
+        dollyZoomTask = Task { @MainActor in
+            defer {
+                dollyZoomRunning = false
+                dollyZoomTask = nil
+            }
+
+            await animateLensDolly(from: app.lensDolly, to: forward, duration: 0.78)
+            guard !Task.isCancelled else { return }
+            await animateLensDolly(from: forward, to: backward, duration: 1.05)
+            guard !Task.isCancelled else { return }
+            await animateLensDolly(from: backward, to: 0, duration: 0.62)
+            guard !Task.isCancelled else { return }
+            app.setLensDolly(0)
+        }
+    }
+
+    private func cancelDollyZoom(reset: Bool) {
+        dollyZoomTask?.cancel()
+        dollyZoomTask = nil
+        dollyZoomRunning = false
+        if reset {
+            app.setLensDolly(0)
+        }
+    }
+
+    @MainActor
+    private func animateLensDolly(from start: Float, to end: Float, duration: TimeInterval) async {
+        let frames = max(1, Int(duration * 60))
+        for frame in 0...frames {
+            if Task.isCancelled { return }
+            let t = Float(frame) / Float(frames)
+            let eased = t * t * (3 - 2 * t)
+            app.setLensDolly(start + (end - start) * eased)
+            try? await Task.sleep(nanoseconds: 16_666_667)
+        }
+    }
+
+    private func lensDock(width: CGFloat, scale: CGFloat) -> some View {
+        VStack(spacing: 9 * scale) {
+            HStack(spacing: 8 * scale) {
+                Image(systemName: "camera.aperture")
+                    .font(.system(size: 12 * scale, weight: .semibold))
+                    .foregroundStyle(OpenReshotPalette.twilightAccent.opacity(0.92))
+                    .frame(width: 25 * scale, height: 25 * scale)
+                    .background(OpenReshotPalette.twilightText.opacity(0.08), in: Circle())
+
+                Text("镜头")
+                    .font(.system(size: 11 * scale, weight: .bold, design: .rounded))
+                    .tracking(1.4)
+                    .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.80))
+
+                Spacer(minLength: 8 * scale)
+
+                Text("\(lensFocusLabel) · \(lensFNumberLabel)")
+                    .font(.system(size: 10 * scale, weight: .semibold, design: .rounded))
+                    .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.58))
+                    .lineLimit(1)
+
+                Button {
+                    playDollyZoom()
+                } label: {
+                    Image(systemName: dollyZoomRunning ? "pause.fill" : "play.fill")
+                        .font(.system(size: 10 * scale, weight: .semibold))
+                        .foregroundStyle(OpenReshotPalette.twilightText.opacity(dollyZoomRunning ? 0.92 : 0.72))
+                        .frame(width: 25 * scale, height: 25 * scale)
+                        .background(OpenReshotPalette.twilightText.opacity(dollyZoomRunning ? 0.13 : 0.07), in: Circle())
+                        .contentShape(Circle())
+                }
+                .disabled(dollyZoomRunning)
+                .buttonStyle(FluidPressButtonStyle(pressedScale: 0.90))
+                .accessibilityLabel("播放推轨变焦")
+
+                Button {
+                    resetLensAndViewpoint()
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 11 * scale, weight: .semibold))
+                        .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.74))
+                        .frame(width: 25 * scale, height: 25 * scale)
+                        .background(OpenReshotPalette.twilightText.opacity(0.07), in: Circle())
+                        .contentShape(Circle())
+                }
+                .buttonStyle(FluidPressButtonStyle(pressedScale: 0.90))
+                .accessibilityLabel("复位镜头")
+            }
+
+            lensValueSlider(
+                systemImage: "scope",
+                leading: "对焦",
+                value: Binding(
+                    get: { Double(app.lensFocusDepth) },
+                    set: {
+                        cancelDollyZoom(reset: false)
+                        app.setLensFocusDepth(Float($0))
+                    }
+                ),
+                range: Double(app.lensFocusMin)...Double(app.lensFocusMax),
+                valueText: lensFocusLabel,
+                scale: scale
+            )
+
+            lensValueSlider(
+                systemImage: "camera.aperture",
+                leading: "光圈",
+                value: Binding(
+                    get: { Double(app.lensFNumber) },
+                    set: { app.setLensFNumber(Float($0)) }
+                ),
+                range: 1.4...16.0,
+                valueText: lensFNumberLabel,
+                scale: scale
+            )
+
+            lensValueSlider(
+                systemImage: "arrow.left.and.right",
+                leading: "推轨",
+                value: Binding(
+                    get: { Double(app.lensDolly) },
+                    set: {
+                        cancelDollyZoom(reset: false)
+                        app.setLensDolly(Float($0))
+                    }
+                ),
+                range: Double(app.lensDollyRange.lowerBound)...Double(app.lensDollyRange.upperBound),
+                valueText: lensDollyLabel,
+                centered: true,
+                scale: scale
+            )
+        }
+        .padding(.horizontal, 12 * scale)
+        .padding(.vertical, 11 * scale)
+        .frame(width: width)
+        .background(OpenReshotPalette.twilightBottom.opacity(0.58), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(OpenReshotPalette.twilightText.opacity(0.13), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.30), radius: 16, y: 8)
+    }
+
+    private func lensValueSlider(
+        systemImage: String,
+        leading: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>,
+        valueText: String,
+        centered: Bool = false,
+        scale: CGFloat
+    ) -> some View {
+        HStack(spacing: 8 * scale) {
+            Image(systemName: systemImage)
+                .font(.system(size: 10.5 * scale, weight: .semibold))
+                .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.54))
+                .frame(width: 15 * scale)
+
+            Text(leading)
+                .font(.system(size: 9 * scale, weight: .semibold, design: .rounded))
+                .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.47))
+                .frame(width: 30 * scale, alignment: .leading)
+
+            LensControlSlider(
+                value: value,
+                range: range,
+                centered: centered,
+                scale: scale
+            )
+
+            Text(valueText)
+                .font(.system(size: 9 * scale, weight: .semibold, design: .rounded))
+                .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.56))
+                .monospacedDigit()
+                .lineLimit(1)
+                .frame(width: 42 * scale, alignment: .trailing)
+        }
+        .frame(height: 25 * scale)
+    }
+
+    private struct LensControlSlider: View {
+        @Binding var value: Double
+        let range: ClosedRange<Double>
+        let centered: Bool
+        let scale: CGFloat
+
+        var body: some View {
+            GeometryReader { proxy in
+                let width = max(proxy.size.width, 1)
+                let progress = CGFloat(sliderProgress(value))
+                let center = centered ? CGFloat(sliderProgress(0)) : 0
+
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(OpenReshotPalette.twilightText.opacity(0.13))
+                        .frame(height: 3 * scale)
+
+                    Capsule()
+                        .fill(OpenReshotPalette.twilightAccent.opacity(0.92))
+                        .frame(width: max(3 * scale, abs(progress - center) * width), height: 3 * scale)
+                        .offset(x: min(progress, center) * width)
+
+                    Circle()
+                        .fill(OpenReshotPalette.twilightText.opacity(0.96))
+                        .frame(width: 18 * scale, height: 18 * scale)
+                        .shadow(color: .black.opacity(0.25), radius: 6, y: 3)
+                        .offset(x: progress * width - 9 * scale)
+                }
+                .frame(height: proxy.size.height)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { gesture in
+                            let x = min(max(gesture.location.x, 0), width)
+                            let nextProgress = Double(x / width)
+                            value = range.lowerBound + nextProgress * (range.upperBound - range.lowerBound)
+                        }
+                )
+            }
+            .frame(height: 24 * scale)
+        }
+
+        private func sliderProgress(_ candidate: Double) -> Double {
+            let span = max(range.upperBound - range.lowerBound, 0.0001)
+            return min(max((candidate - range.lowerBound) / span, 0), 1)
+        }
+    }
+
+    private var lensFNumberLabel: String {
+        let value = app.lensFNumber
+        if abs(value.rounded() - value) < 0.05 {
+            return "f/\(Int(value.rounded()))"
+        }
+        return String(format: "f/%.1f", value)
+    }
+
+    private var lensFocusLabel: String {
+        String(format: "%.1fm", app.lensFocusDepth)
+    }
+
+    private var lensDollyLabel: String {
+        if abs(app.lensDolly) < 0.01 {
+            return "0.00m"
+        }
+        return String(format: "%+.2fm", app.lensDolly)
     }
 
     private func twilightPhotoStage(width: CGFloat, height: CGFloat) -> some View {
@@ -2061,6 +2810,9 @@ struct ContentView: View {
         ZStack {
             Button {
                 withAnimation(.easeInOut(duration: 0.18)) {
+                    if !comparingResult {
+                        comparisonWipePosition = 0.5
+                    }
                     comparingResult.toggle()
                 }
             } label: {
@@ -2487,31 +3239,94 @@ struct ContentView: View {
     }
 
     private func resultOverlay(_ image: UIImage) -> some View {
-        let displayImage = comparingResult ? (app.inputImage ?? app.capturedFrame ?? image) : image
+        let beforeImage = app.inputImage ?? app.capturedFrame ?? image
 
-        return ZStack {
-            Image(uiImage: displayImage)
-                .resizable()
-                .scaledToFit()
+        return GeometryReader { proxy in
+            let width = max(proxy.size.width, 1)
+            let wipeX = width * comparisonWipePosition
 
-            if comparingResult {
-                VStack {
-                    HStack {
-                        Text("原图")
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .tracking(2)
-                            .foregroundStyle(OpenReshotPalette.twilightText)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 5)
-                            .background(OpenReshotPalette.twilightBottom.opacity(0.65), in: Capsule())
-                        Spacer()
-                    }
-                    Spacer()
+            ZStack {
+                Image(uiImage: comparingResult ? beforeImage : image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+
+                if comparingResult {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                        .mask(alignment: .leading) {
+                            Rectangle()
+                                .frame(width: wipeX)
+                        }
+
+                    comparisonWipeChrome(x: wipeX, size: proxy.size)
                 }
-                .padding(12)
             }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        guard comparingResult else { return }
+                        comparisonWipePosition = min(max(value.location.x / width, 0), 1)
+                    }
+            )
         }
         .animation(.easeInOut(duration: 0.18), value: comparingResult)
+    }
+
+    private func comparisonWipeChrome(x: CGFloat, size: CGSize) -> some View {
+        let clampedX = min(max(x, 0), size.width)
+
+        return ZStack(alignment: .topLeading) {
+            VStack {
+                HStack {
+                    comparisonBadge("原图")
+                    Spacer()
+                    comparisonBadge("成片")
+                }
+                .padding(12)
+
+                Spacer()
+            }
+
+            Rectangle()
+                .fill(OpenReshotPalette.twilightText.opacity(0.88))
+                .frame(width: 1.4, height: size.height)
+                .offset(x: clampedX)
+
+            ZStack {
+                Circle()
+                    .fill(OpenReshotPalette.twilightBottom.opacity(0.72))
+                    .frame(width: 38, height: 38)
+                    .overlay(
+                        Circle()
+                            .strokeBorder(OpenReshotPalette.twilightText.opacity(0.42), lineWidth: 1)
+                    )
+
+                Image(systemName: "arrow.left.and.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.90))
+            }
+            .shadow(color: .black.opacity(0.34), radius: 12, y: 6)
+            .offset(x: clampedX - 19, y: max(14, size.height * 0.50 - 19))
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func comparisonBadge(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 11, weight: .bold, design: .rounded))
+            .tracking(1.6)
+            .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.88))
+            .padding(.horizontal, 11)
+            .padding(.vertical, 5)
+            .background(OpenReshotPalette.twilightBottom.opacity(0.60), in: Capsule())
+            .overlay(
+                Capsule()
+                    .strokeBorder(OpenReshotPalette.twilightText.opacity(0.10), lineWidth: 1)
+            )
     }
 
     private var toolbar: some View {
@@ -2598,6 +3413,203 @@ struct ContentView: View {
             .frame(width: 44, height: 44)
             .contentShape(Rectangle())
     }
+}
+
+private struct ReshotGalleryView: View {
+    @ObservedObject var app: AppState
+    @Environment(\.dismiss) private var dismiss
+    let onSelect: (ReshotCacheItem) -> Void
+
+    private let columns = [
+        GridItem(.adaptive(minimum: 138, maximum: 190), spacing: 12)
+    ]
+
+    var body: some View {
+        ZStack {
+            SettingsSheetStyle.pageBackground.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                Color.clear
+                    .frame(height: 42)
+
+                VStack(spacing: 0) {
+                    grabber
+                    topBar
+
+                    if app.galleryItems.isEmpty {
+                        emptyState
+                    } else {
+                        ScrollView {
+                            LazyVGrid(columns: columns, spacing: 12) {
+                                ForEach(app.galleryItems) { item in
+                                    Button {
+                                        onSelect(item)
+                                        dismiss()
+                                    } label: {
+                                        galleryCard(item)
+                                    }
+                                    .buttonStyle(FluidPressButtonStyle(pressedScale: 0.97))
+                                    .contextMenu {
+                                        Button(role: .destructive) {
+                                            app.deleteCachedReshot(item)
+                                        } label: {
+                                            Label("删除", systemImage: "trash")
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 18)
+                            .padding(.top, 18)
+                            .padding(.bottom, 46)
+                        }
+                        .scrollIndicators(.hidden)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(SettingsSheetStyle.panelBackground, in: UnevenRoundedRectangle(topLeadingRadius: 34, topTrailingRadius: 34))
+                .overlay(alignment: .top) {
+                    UnevenRoundedRectangle(topLeadingRadius: 34, topTrailingRadius: 34)
+                        .strokeBorder(SettingsSheetStyle.panelStroke, lineWidth: 1)
+                }
+                .shadow(color: .black.opacity(0.55), radius: 38, y: -12)
+            }
+        }
+        .onAppear {
+            app.refreshGallery()
+        }
+    }
+
+    private var grabber: some View {
+        HStack {
+            Spacer()
+            Capsule()
+                .fill(SettingsSheetStyle.primaryText.opacity(0.20))
+                .frame(width: 42, height: 5)
+            Spacer()
+        }
+        .padding(.top, 10)
+        .padding(.bottom, 4)
+    }
+
+    private var topBar: some View {
+        HStack {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .settingsChromeButton()
+            .accessibilityLabel("关闭空间画廊")
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("空间画廊")
+                    .font(.system(size: 18, weight: .semibold, design: .rounded))
+                    .foregroundStyle(SettingsSheetStyle.primaryText)
+
+                Text("\(app.galleryItems.count) 个空间")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(SettingsSheetStyle.tertiaryText)
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 8)
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            Spacer(minLength: 0)
+
+            Image(systemName: "photo.stack")
+                .font(.system(size: 30, weight: .regular))
+                .foregroundStyle(SettingsSheetStyle.secondaryText)
+                .frame(width: 58, height: 58)
+                .background(SettingsSheetStyle.iconFill, in: Circle())
+
+            Text("还没有空间")
+                .font(.system(size: 18, weight: .semibold, design: .rounded))
+                .foregroundStyle(SettingsSheetStyle.primaryText)
+
+            Text("构建过的空间会自动保存在这里")
+                .font(.system(size: 13, weight: .regular, design: .rounded))
+                .foregroundStyle(SettingsSheetStyle.secondaryText)
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 24)
+    }
+
+    private func galleryCard(_ item: ReshotCacheItem) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            ZStack {
+                if let url = ReshotCacheStore.thumbnailURL(for: item),
+                   let image = UIImage(contentsOfFile: url.path) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    Rectangle()
+                        .fill(SettingsSheetStyle.controlFill)
+                        .overlay {
+                            Image(systemName: "photo")
+                                .font(.system(size: 20, weight: .regular))
+                                .foregroundStyle(SettingsSheetStyle.tertiaryText)
+                        }
+                }
+            }
+            .frame(height: 174)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(SettingsSheetStyle.hairline, lineWidth: 1)
+            )
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(Self.dateFormatter.string(from: item.createdAt))
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(SettingsSheetStyle.primaryText)
+                    .lineLimit(1)
+
+                Text("\(qualityLabel(item.quality)) · \(Self.countFormatter.string(from: NSNumber(value: item.splatCount)) ?? "\(item.splatCount)") 点")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(SettingsSheetStyle.secondaryText)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 2)
+            .padding(.bottom, 3)
+        }
+        .padding(7)
+        .background(SettingsSheetStyle.cardFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(SettingsSheetStyle.cardStroke, lineWidth: 1)
+        )
+    }
+
+    private func qualityLabel(_ rawValue: String) -> String {
+        switch RenderQuality(rawValue: rawValue) {
+        case .some(.high):
+            return "高清"
+        case .some(.smooth):
+            return "流畅"
+        case .none:
+            return "缓存"
+        }
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "M月d日 HH:mm"
+        return formatter
+    }()
+
+    private static let countFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        return formatter
+    }()
 }
 
 struct SettingsView: View {
