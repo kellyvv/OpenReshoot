@@ -278,7 +278,23 @@ final class MotionVideoWriter: @unchecked Sendable {
         UIGraphicsPushContext(context)
         image.draw(in: CGRect(x: 0, y: 0, width: width, height: height))
         UIGraphicsPopContext()
+        Self.flipPixelBufferRows(baseAddress: baseAddress, bytesPerRow: bytesPerRow, height: height)
         return pixelBuffer
+    }
+
+    private static func flipPixelBufferRows(baseAddress: UnsafeMutableRawPointer, bytesPerRow: Int, height: Int) {
+        guard height > 1, bytesPerRow > 0 else { return }
+        var scratch = Data(count: bytesPerRow)
+        scratch.withUnsafeMutableBytes { scratchBytes in
+            guard let scratchBase = scratchBytes.baseAddress else { return }
+            for row in 0..<(height / 2) {
+                let top = baseAddress.advanced(by: row * bytesPerRow)
+                let bottom = baseAddress.advanced(by: (height - 1 - row) * bytesPerRow)
+                memcpy(scratchBase, top, bytesPerRow)
+                memcpy(top, bottom, bytesPerRow)
+                memcpy(bottom, scratchBase, bytesPerRow)
+            }
+        }
     }
 }
 
