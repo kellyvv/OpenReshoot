@@ -1334,11 +1334,12 @@ final class AppState: ObservableObject {
     }
 
     private func motionFramePlan(for format: MotionExportFormat) -> MotionFramePlan {
-        MotionFramePlan(
+        let tiltRange = format == .livePhoto ? ReshotViewAngleMode.standard.exportTiltRange : viewAngleMode.exportTiltRange
+        return MotionFramePlan(
             size: Self.motionExportSize(for: imageAspect),
             fps: Self.motionExportFPS,
             frameCount: format == .livePhoto ? Self.livePhotoExportFrameCount : Self.motionExportFrameCount,
-            tiltRange: viewAngleMode.exportTiltRange,
+            tiltRange: tiltRange,
             path: format == .livePhoto ? .centerOrbit(clockwise: true) : .shuttle
         )
     }
