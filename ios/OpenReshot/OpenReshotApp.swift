@@ -3051,30 +3051,45 @@ struct ContentView: View {
     }
 
     private func lensDock(width: CGFloat, scale: CGFloat) -> some View {
-        VStack(spacing: 7 * scale) {
-            HStack(spacing: 6 * scale) {
-                ForEach(ReshotViewAngleMode.allCases) { mode in
-                    lensAngleModeButton(mode, scale: scale)
-                }
+        glassDockGroup(spacing: 7 * scale) {
+            VStack(spacing: 7 * scale) {
+                lensQuickControlDock(width: width, scale: scale)
+                lensSliderDock(width: width, scale: scale)
+            }
+        }
+    }
 
-                Button {
-                    playDollyZoom()
-                } label: {
-                    dockIconButton(systemName: dollyZoomRunning ? "pause.fill" : "play.fill", highlighted: dollyZoomRunning, scale: scale)
-                }
-                .disabled(dollyZoomRunning)
-                .buttonStyle(FluidPressButtonStyle(pressedScale: 0.90))
-                .accessibilityLabel("播放推轨变焦")
-
-                Button {
-                    resetLensAndViewpoint()
-                } label: {
-                    dockIconButton(systemName: "arrow.counterclockwise", scale: scale)
-                }
-                .buttonStyle(FluidPressButtonStyle(pressedScale: 0.90))
-                .accessibilityLabel("复位镜头")
+    private func lensQuickControlDock(width: CGFloat, scale: CGFloat) -> some View {
+        HStack(spacing: 6 * scale) {
+            ForEach(ReshotViewAngleMode.allCases) { mode in
+                lensAngleModeButton(mode, scale: scale)
             }
 
+            Button {
+                playDollyZoom()
+            } label: {
+                dockIconButton(systemName: dollyZoomRunning ? "pause.fill" : "play.fill", highlighted: dollyZoomRunning, scale: scale)
+            }
+            .disabled(dollyZoomRunning)
+            .buttonStyle(FluidPressButtonStyle(pressedScale: 0.90))
+            .accessibilityLabel("播放推轨变焦")
+
+            Button {
+                resetLensAndViewpoint()
+            } label: {
+                dockIconButton(systemName: "arrow.counterclockwise", scale: scale)
+            }
+            .buttonStyle(FluidPressButtonStyle(pressedScale: 0.90))
+            .accessibilityLabel("复位镜头")
+        }
+        .padding(.horizontal, 11 * scale)
+        .padding(.vertical, 10 * scale)
+        .frame(width: width)
+        .openReshotGlassPanel(cornerRadius: 22)
+    }
+
+    private func lensSliderDock(width: CGFloat, scale: CGFloat) -> some View {
+        VStack(spacing: 7 * scale) {
             lensValueSlider(
                 systemImage: "scope",
                 leading: "对焦",
@@ -3122,6 +3137,20 @@ struct ContentView: View {
         .padding(.vertical, 10 * scale)
         .frame(width: width)
         .openReshotGlassPanel(cornerRadius: 22)
+    }
+
+    @ViewBuilder
+    private func glassDockGroup<Content: View>(
+        spacing: CGFloat,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: spacing) {
+                content()
+            }
+        } else {
+            content()
+        }
     }
 
     private func lensAngleModeButton(_ mode: ReshotViewAngleMode, scale: CGFloat) -> some View {
