@@ -110,8 +110,17 @@ struct ReshotCacheItem: Codable, Identifiable, Equatable {
 }
 
 private enum ReshotCacheStore {
+    private static let bundledDemoID = "openreshot-bundled-demo"
+    private static let bundledDemoResource = "DemoFLOW"
     private static let folderName = "ReshotCache"
     private static let metadataFileName = "Reshot.json"
+
+    static func galleryItems() -> [ReshotCacheItem] {
+        if let demo = bundledDemoItem {
+            return [demo] + loadItems()
+        }
+        return loadItems()
+    }
 
     static func loadItems() -> [ReshotCacheItem] {
         guard let root = try? rootDirectory(create: false),
@@ -143,18 +152,32 @@ private enum ReshotCacheStore {
     }
 
     static func sourceURL(for item: ReshotCacheItem) -> URL? {
-        cacheDirectory(for: item)?.appendingPathComponent(item.sourceImageName)
+        if isBundledItem(item) {
+            return Bundle.main.url(forResource: bundledDemoResource, withExtension: "png")
+        }
+        return cacheDirectory(for: item)?.appendingPathComponent(item.sourceImageName)
     }
 
     static func thumbnailURL(for item: ReshotCacheItem) -> URL? {
-        cacheDirectory(for: item)?.appendingPathComponent(item.thumbnailImageName)
+        if isBundledItem(item) {
+            return Bundle.main.url(forResource: bundledDemoResource, withExtension: "png")
+        }
+        return cacheDirectory(for: item)?.appendingPathComponent(item.thumbnailImageName)
     }
 
     static func splatURL(for item: ReshotCacheItem) -> URL? {
-        cacheDirectory(for: item)?.appendingPathComponent(item.splatFileName)
+        if isBundledItem(item) {
+            return Bundle.main.url(forResource: bundledDemoResource, withExtension: "ply")
+        }
+        return cacheDirectory(for: item)?.appendingPathComponent(item.splatFileName)
+    }
+
+    static func isBundledItem(_ item: ReshotCacheItem) -> Bool {
+        item.id == bundledDemoID
     }
 
     static func delete(_ item: ReshotCacheItem) throws {
+        guard !isBundledItem(item) else { return }
         guard let directory = cacheDirectory(for: item) else { return }
         try FileManager.default.removeItem(at: directory)
     }
@@ -239,6 +262,28 @@ private enum ReshotCacheStore {
         try? rootDirectory(create: false).appendingPathComponent(item.id, isDirectory: true)
     }
 
+    private static var bundledDemoItem: ReshotCacheItem? {
+        guard Bundle.main.url(forResource: bundledDemoResource, withExtension: "png") != nil,
+              Bundle.main.url(forResource: bundledDemoResource, withExtension: "ply") != nil else {
+            return nil
+        }
+        return ReshotCacheItem(
+            id: bundledDemoID,
+            formatVersion: 1,
+            createdAt: Date(timeIntervalSince1970: 0),
+            sourceSignature: bundledDemoID,
+            quality: "demo",
+            splatCount: 1_179_648,
+            focus: 1.4492188,
+            focalPixels: 1330.3168,
+            width: 941,
+            height: 1672,
+            sourceImageName: "\(bundledDemoResource).png",
+            thumbnailImageName: "\(bundledDemoResource).png",
+            splatFileName: "\(bundledDemoResource).ply"
+        )
+    }
+
     private static func thumbnailImage(from image: UIImage) -> UIImage {
         let maxSide: CGFloat = 420
         let longest = max(image.size.width, image.size.height, 1)
@@ -308,6 +353,7 @@ final class AppState: ObservableObject {
     private static let demoSceneFocus: Float = 1.4492188
     private static let demoSceneWidth = 941
     private static let demoSceneHeight = 1672
+    private static let didAutoloadDemoSceneKey = "OpenReshot.didAutoloadDemoScene"
     private static var memoryGB: UInt64 { ProcessInfo.processInfo.physicalMemory / 1_073_741_824 }
     private static let enhancePrompt = """
     This image is a novel-view render produced from a 3D Gaussian Splatting reconstruction. Because the camera viewpoint changed, some newly exposed edges, disoccluded regions, stretched areas, warped details, holes, and blurry splat artifacts may appear.
@@ -321,7 +367,7 @@ final class AppState: ObservableObject {
 
     init() {
         geminiKey = UserDefaults.standard.string(forKey: "OpenReshot.geminiKey") ?? ""
-        galleryItems = ReshotCacheStore.loadItems()
+        galleryItems = ReshotCacheStore.galleryItems()
         memoryWarningObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification,
             object: nil,
@@ -369,6 +415,7 @@ final class AppState: ObservableObject {
     @MainActor
     func loadDemoSceneIfNeeded() {
         guard !didLoadDemoScene, inputImage == nil else { return }
+        guard !UserDefaults.standard.bool(forKey: Self.didAutoloadDemoSceneKey) else { return }
         guard let imageURL = Bundle.main.url(forResource: Self.demoSceneResource, withExtension: "png"),
               let sceneURL = Bundle.main.url(forResource: Self.demoSceneResource, withExtension: "ply"),
               let data = try? Data(contentsOf: imageURL),
@@ -379,6 +426,7 @@ final class AppState: ObservableObject {
 
         print("🌄 [OpenReshot] loading bundled demo scene \(sceneURL.lastPathComponent)")
         didLoadDemoScene = true
+        UserDefaults.standard.set(true, forKey: Self.didAutoloadDemoSceneKey)
         let taskID = UUID()
         activeTaskID = taskID
         reconstructionRequestID = taskID
@@ -610,7 +658,7 @@ final class AppState: ObservableObject {
 
     @MainActor
     func refreshGallery() {
-        galleryItems = ReshotCacheStore.loadItems()
+        galleryItems = ReshotCacheStore.galleryItems()
     }
 
     @MainActor
@@ -1524,6 +1572,7 @@ struct ContentView: View {
     @State private var dollyZoomRunning = false
     @State private var focusGeminiKeyWhenSettingsOpen = false
     private let toolbarHeight: CGFloat = 88
+    private static let didShowDragHintKey = "OpenReshot.didShowDragHint"
 
     var body: some View {
         return ZStack {
@@ -2281,6 +2330,8 @@ struct ContentView: View {
 
     private func revealDragHintAfterRendererReady() {
         guard app.inputImage != nil, app.rendererReady, app.resultImage == nil, !app.reconstructingFrame else { return }
+        guard !UserDefaults.standard.bool(forKey: Self.didShowDragHintKey) else { return }
+        UserDefaults.standard.set(true, forKey: Self.didShowDragHintKey)
         withAnimation(.easeOut(duration: 0.24)) {
             showDragHint = true
         }
@@ -3450,10 +3501,12 @@ private struct ReshotGalleryView: View {
                                     }
                                     .buttonStyle(FluidPressButtonStyle(pressedScale: 0.97))
                                     .contextMenu {
-                                        Button(role: .destructive) {
-                                            app.deleteCachedReshot(item)
-                                        } label: {
-                                            Label("删除", systemImage: "trash")
+                                        if !ReshotCacheStore.isBundledItem(item) {
+                                            Button(role: .destructive) {
+                                                app.deleteCachedReshot(item)
+                                            } label: {
+                                                Label("删除", systemImage: "trash")
+                                            }
                                         }
                                     }
                                 }
@@ -3567,7 +3620,7 @@ private struct ReshotGalleryView: View {
             )
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(Self.dateFormatter.string(from: item.createdAt))
+                Text(ReshotCacheStore.isBundledItem(item) ? "默认预览" : Self.dateFormatter.string(from: item.createdAt))
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(SettingsSheetStyle.primaryText)
                     .lineLimit(1)
@@ -3595,6 +3648,9 @@ private struct ReshotGalleryView: View {
         case .some(.smooth):
             return "流畅"
         case .none:
+            if rawValue == "demo" {
+                return "内置示例"
+            }
             return "缓存"
         }
     }
