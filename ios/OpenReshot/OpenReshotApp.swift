@@ -2484,9 +2484,12 @@ struct ContentView: View {
                 flowBottomAction(phase: phase, scale: scale)
             }
 
+            let floatingDockWidth = max(1, min(stageSize.width - 50 * scale, 286 * scale))
+            let floatingDockY = max(photoTopInset + 78 * scale, bottomActionTop - 98 * scale)
+
             if motionExportMenuExpanded || app.motionExportState == .rendering {
-                motionExportDock(width: max(1, min(stageSize.width - 24 * scale, 318 * scale)), scale: scale)
-                    .position(x: size.width / 2, y: max(photoTopInset + 84 * scale, bottomActionTop - 102 * scale))
+                motionExportDock(width: floatingDockWidth, scale: scale)
+                    .position(x: size.width / 2, y: floatingDockY)
                     .transition(.asymmetric(
                         insertion: .opacity.combined(with: .scale(scale: 0.96)).animation(.spring(response: 0.30, dampingFraction: 0.84)),
                         removal: .opacity.animation(.easeOut(duration: 0.18))
@@ -2495,8 +2498,8 @@ struct ContentView: View {
             }
 
             if lensDockExpanded, phase == .compose, app.rendererReady, app.resultImage == nil {
-                lensDock(width: max(1, min(stageSize.width - 24 * scale, 318 * scale)), scale: scale)
-                    .position(x: size.width / 2, y: max(photoTopInset + 84 * scale, bottomActionTop - 102 * scale))
+                lensDock(width: floatingDockWidth, scale: scale)
+                    .position(x: size.width / 2, y: floatingDockY)
                     .transition(.asymmetric(
                         insertion: .opacity.combined(with: .scale(scale: 0.96)).animation(.spring(response: 0.30, dampingFraction: 0.84)),
                         removal: .opacity.animation(.easeOut(duration: 0.18))
@@ -3048,35 +3051,22 @@ struct ContentView: View {
     }
 
     private func lensDock(width: CGFloat, scale: CGFloat) -> some View {
-        VStack(spacing: 9 * scale) {
-            HStack(spacing: 8 * scale) {
-                Image(systemName: "camera.aperture")
-                    .font(.system(size: 12 * scale, weight: .semibold))
-                    .foregroundStyle(OpenReshotPalette.twilightAccent.opacity(0.92))
-                    .frame(width: 25 * scale, height: 25 * scale)
-                    .background(OpenReshotPalette.twilightText.opacity(0.08), in: Circle())
-
-                Text("镜头")
-                    .font(.system(size: 11 * scale, weight: .bold, design: .rounded))
-                    .tracking(1.4)
-                    .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.80))
+        VStack(spacing: 7 * scale) {
+            HStack(spacing: 7 * scale) {
+                dockGlyph(systemName: "camera.aperture", scale: scale)
 
                 Spacer(minLength: 8 * scale)
 
                 Text("\(app.viewAngleMode.title) · \(lensFocusLabel) · \(lensFNumberLabel)")
                     .font(.system(size: 10 * scale, weight: .semibold, design: .rounded))
-                    .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.58))
+                    .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.70))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.78)
 
                 Button {
                     playDollyZoom()
                 } label: {
-                    Image(systemName: dollyZoomRunning ? "pause.fill" : "play.fill")
-                        .font(.system(size: 10 * scale, weight: .semibold))
-                        .foregroundStyle(OpenReshotPalette.twilightText.opacity(dollyZoomRunning ? 0.92 : 0.72))
-                        .frame(width: 25 * scale, height: 25 * scale)
-                        .background(OpenReshotPalette.twilightText.opacity(dollyZoomRunning ? 0.13 : 0.07), in: Circle())
-                        .contentShape(Circle())
+                    dockIconButton(systemName: dollyZoomRunning ? "pause.fill" : "play.fill", highlighted: dollyZoomRunning, scale: scale)
                 }
                 .disabled(dollyZoomRunning)
                 .buttonStyle(FluidPressButtonStyle(pressedScale: 0.90))
@@ -3085,12 +3075,7 @@ struct ContentView: View {
                 Button {
                     resetLensAndViewpoint()
                 } label: {
-                    Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 11 * scale, weight: .semibold))
-                        .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.74))
-                        .frame(width: 25 * scale, height: 25 * scale)
-                        .background(OpenReshotPalette.twilightText.opacity(0.07), in: Circle())
-                        .contentShape(Circle())
+                    dockIconButton(systemName: "arrow.counterclockwise", scale: scale)
                 }
                 .buttonStyle(FluidPressButtonStyle(pressedScale: 0.90))
                 .accessibilityLabel("复位镜头")
@@ -3141,24 +3126,14 @@ struct ContentView: View {
                 scale: scale
             )
         }
-        .padding(.horizontal, 12 * scale)
-        .padding(.vertical, 11 * scale)
+        .padding(.horizontal, 11 * scale)
+        .padding(.vertical, 10 * scale)
         .frame(width: width)
-        .openReshotGlassPanel(cornerRadius: 8)
+        .openReshotGlassPanel(cornerRadius: 22)
     }
 
     private func lensAngleModeControl(scale: CGFloat) -> some View {
-        HStack(spacing: 8 * scale) {
-            Image(systemName: "viewfinder")
-                .font(.system(size: 10.5 * scale, weight: .semibold))
-                .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.54))
-                .frame(width: 15 * scale)
-
-            Text("视角")
-                .font(.system(size: 9 * scale, weight: .semibold, design: .rounded))
-                .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.47))
-                .frame(width: 30 * scale, alignment: .leading)
-
+        HStack(spacing: 7 * scale) {
             HStack(spacing: 4 * scale) {
                 ForEach(ReshotViewAngleMode.allCases) { mode in
                     let selected = app.viewAngleMode == mode
@@ -3167,16 +3142,20 @@ struct ContentView: View {
                     } label: {
                         Text(mode.title)
                             .font(.system(size: 9 * scale, weight: .bold, design: .rounded))
-                            .foregroundStyle(selected ? OpenReshotPalette.twilightButtonText : OpenReshotPalette.twilightText.opacity(0.58))
+                            .foregroundStyle(selected ? OpenReshotPalette.twilightText.opacity(0.92) : OpenReshotPalette.twilightText.opacity(0.56))
                             .lineLimit(1)
                             .minimumScaleFactor(0.82)
                             .frame(maxWidth: .infinity)
-                            .frame(height: 23 * scale)
+                            .frame(height: 24 * scale)
                             .background(
                                 selected
-                                ? OpenReshotPalette.twilightAccent.opacity(0.92)
-                                : OpenReshotPalette.twilightText.opacity(0.07),
+                                ? OpenReshotPalette.twilightText.opacity(0.17)
+                                : OpenReshotPalette.twilightText.opacity(0.055),
                                 in: Capsule()
+                            )
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(selected ? OpenReshotPalette.twilightAccent.opacity(0.38) : OpenReshotPalette.twilightText.opacity(0.055), lineWidth: 0.8)
                             )
                     }
                     .buttonStyle(FluidPressButtonStyle(pressedScale: 0.96))
@@ -3184,41 +3163,28 @@ struct ContentView: View {
                 }
             }
         }
-        .frame(height: 25 * scale)
+        .frame(height: 24 * scale)
     }
 
     private func motionExportDock(width: CGFloat, scale: CGFloat) -> some View {
-        VStack(spacing: 9 * scale) {
-            HStack(spacing: 8 * scale) {
-                Image(systemName: "livephoto")
-                    .font(.system(size: 12 * scale, weight: .semibold))
-                    .foregroundStyle(OpenReshotPalette.twilightAccent.opacity(0.92))
-                    .frame(width: 25 * scale, height: 25 * scale)
-                    .background(OpenReshotPalette.twilightText.opacity(0.08), in: Circle())
-
-                Text("动效导出")
-                    .font(.system(size: 11 * scale, weight: .bold, design: .rounded))
-                    .tracking(1.2)
-                    .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.80))
+        VStack(spacing: 8 * scale) {
+            HStack(spacing: 7 * scale) {
+                dockGlyph(systemName: "livephoto", scale: scale)
 
                 Spacer(minLength: 8 * scale)
 
-                Text(app.viewAngleMode.title)
+                Text("动效 · \(app.viewAngleMode.title)")
                     .font(.system(size: 10 * scale, weight: .semibold, design: .rounded))
-                    .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.58))
+                    .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.70))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.78)
 
                 Button {
                     withAnimation(.easeOut(duration: 0.18)) {
                         motionExportMenuExpanded = false
                     }
                 } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10 * scale, weight: .semibold))
-                        .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.70))
-                        .frame(width: 25 * scale, height: 25 * scale)
-                        .background(OpenReshotPalette.twilightText.opacity(0.07), in: Circle())
-                        .contentShape(Circle())
+                    dockIconButton(systemName: "xmark", scale: scale)
                 }
                 .buttonStyle(FluidPressButtonStyle(pressedScale: 0.90))
                 .accessibilityLabel("关闭动效导出")
@@ -3237,10 +3203,10 @@ struct ContentView: View {
                     .clipShape(Capsule())
             }
         }
-        .padding(.horizontal, 12 * scale)
-        .padding(.vertical, 11 * scale)
+        .padding(.horizontal, 11 * scale)
+        .padding(.vertical, 10 * scale)
         .frame(width: width)
-        .openReshotGlassPanel(cornerRadius: 8)
+        .openReshotGlassPanel(cornerRadius: 22)
     }
 
     private func motionExportFormatButton(_ format: MotionExportFormat, scale: CGFloat) -> some View {
@@ -3261,14 +3227,14 @@ struct ContentView: View {
             }
             .foregroundStyle(enabled || active ? OpenReshotPalette.twilightText.opacity(0.76) : OpenReshotPalette.twilightText.opacity(0.26))
             .frame(maxWidth: .infinity)
-            .frame(height: 50 * scale)
+            .frame(height: 46 * scale)
             .background(
-                active ? OpenReshotPalette.twilightAccent.opacity(0.18) : OpenReshotPalette.twilightText.opacity(enabled ? 0.075 : 0.035),
-                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                active ? OpenReshotPalette.twilightText.opacity(0.16) : OpenReshotPalette.twilightText.opacity(enabled ? 0.065 : 0.03),
+                in: RoundedRectangle(cornerRadius: 12 * scale, style: .continuous)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(active ? OpenReshotPalette.twilightAccent.opacity(0.40) : OpenReshotPalette.twilightText.opacity(0.07), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 12 * scale, style: .continuous)
+                    .strokeBorder(active ? OpenReshotPalette.twilightAccent.opacity(0.36) : OpenReshotPalette.twilightText.opacity(0.06), lineWidth: 0.8)
             )
         }
         .disabled(!enabled)
@@ -3301,6 +3267,31 @@ struct ContentView: View {
         return format.title
     }
 
+    private func dockGlyph(systemName: String, scale: CGFloat) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 12 * scale, weight: .semibold))
+            .foregroundStyle(OpenReshotPalette.twilightAccent.opacity(0.92))
+            .frame(width: 24 * scale, height: 24 * scale)
+            .background(OpenReshotPalette.twilightText.opacity(0.09), in: Circle())
+            .overlay(
+                Circle()
+                    .strokeBorder(OpenReshotPalette.twilightText.opacity(0.08), lineWidth: 0.8)
+            )
+    }
+
+    private func dockIconButton(systemName: String, highlighted: Bool = false, scale: CGFloat) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 10.5 * scale, weight: .semibold))
+            .foregroundStyle(OpenReshotPalette.twilightText.opacity(highlighted ? 0.92 : 0.72))
+            .frame(width: 24 * scale, height: 24 * scale)
+            .background(OpenReshotPalette.twilightText.opacity(highlighted ? 0.14 : 0.075), in: Circle())
+            .overlay(
+                Circle()
+                    .strokeBorder(OpenReshotPalette.twilightText.opacity(highlighted ? 0.12 : 0.07), lineWidth: 0.8)
+            )
+            .contentShape(Circle())
+    }
+
     private func lensValueSlider(
         systemImage: String,
         leading: String,
@@ -3310,16 +3301,16 @@ struct ContentView: View {
         centered: Bool = false,
         scale: CGFloat
     ) -> some View {
-        HStack(spacing: 8 * scale) {
+        HStack(spacing: 7 * scale) {
             Image(systemName: systemImage)
-                .font(.system(size: 10.5 * scale, weight: .semibold))
-                .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.54))
-                .frame(width: 15 * scale)
+                .font(.system(size: 10 * scale, weight: .semibold))
+                .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.58))
+                .frame(width: 14 * scale)
 
             Text(leading)
-                .font(.system(size: 9 * scale, weight: .semibold, design: .rounded))
-                .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.47))
-                .frame(width: 30 * scale, alignment: .leading)
+                .font(.system(size: 8.5 * scale, weight: .semibold, design: .rounded))
+                .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.52))
+                .frame(width: 25 * scale, alignment: .leading)
 
             LensControlSlider(
                 value: value,
@@ -3329,13 +3320,14 @@ struct ContentView: View {
             )
 
             Text(valueText)
-                .font(.system(size: 9 * scale, weight: .semibold, design: .rounded))
-                .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.56))
+                .font(.system(size: 8.5 * scale, weight: .semibold, design: .rounded))
+                .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.62))
                 .monospacedDigit()
                 .lineLimit(1)
-                .frame(width: 42 * scale, alignment: .trailing)
+                .minimumScaleFactor(0.82)
+                .frame(width: 38 * scale, alignment: .trailing)
         }
-        .frame(height: 25 * scale)
+        .frame(height: 22 * scale)
     }
 
     private struct LensControlSlider: View {
@@ -3353,18 +3345,18 @@ struct ContentView: View {
                 ZStack(alignment: .leading) {
                     Capsule()
                         .fill(OpenReshotPalette.twilightText.opacity(0.13))
-                        .frame(height: 3 * scale)
+                        .frame(height: 2.4 * scale)
 
                     Capsule()
                         .fill(OpenReshotPalette.twilightAccent.opacity(0.92))
-                        .frame(width: max(3 * scale, abs(progress - center) * width), height: 3 * scale)
+                        .frame(width: max(2.4 * scale, abs(progress - center) * width), height: 2.4 * scale)
                         .offset(x: min(progress, center) * width)
 
                     Circle()
                         .fill(OpenReshotPalette.twilightText.opacity(0.96))
-                        .frame(width: 18 * scale, height: 18 * scale)
+                        .frame(width: 15.5 * scale, height: 15.5 * scale)
                         .shadow(color: .black.opacity(0.25), radius: 6, y: 3)
-                        .offset(x: progress * width - 9 * scale)
+                        .offset(x: progress * width - 7.75 * scale)
                 }
                 .frame(height: proxy.size.height)
                 .contentShape(Rectangle())
@@ -4189,18 +4181,19 @@ private struct OpenReshotGlassPanelModifier: ViewModifier {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         if #available(iOS 26.0, *) {
             content
-                .glassEffect(.regular.interactive(), in: shape)
+                .glassEffect(.regular.tint(OpenReshotPalette.twilightText.opacity(0.045)).interactive(), in: shape)
                 .overlay(
-                    shape.strokeBorder(OpenReshotPalette.twilightText.opacity(0.16), lineWidth: 1)
+                    shape.strokeBorder(OpenReshotPalette.twilightText.opacity(0.18), lineWidth: 0.8)
                 )
-                .shadow(color: .black.opacity(0.28), radius: 18, y: 9)
+                .shadow(color: .black.opacity(0.24), radius: 22, y: 10)
         } else {
             content
-                .background(OpenReshotPalette.twilightBottom.opacity(0.58), in: shape)
+                .background(.ultraThinMaterial, in: shape)
+                .background(OpenReshotPalette.twilightInk.opacity(0.18), in: shape)
                 .overlay(
-                    shape.strokeBorder(OpenReshotPalette.twilightText.opacity(0.13), lineWidth: 1)
+                    shape.strokeBorder(OpenReshotPalette.twilightText.opacity(0.14), lineWidth: 0.8)
                 )
-                .shadow(color: .black.opacity(0.30), radius: 16, y: 8)
+                .shadow(color: .black.opacity(0.26), radius: 20, y: 9)
         }
     }
 }
