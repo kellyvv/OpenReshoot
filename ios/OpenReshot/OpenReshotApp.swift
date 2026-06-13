@@ -1207,18 +1207,6 @@ final class AppState: ObservableObject {
     func exportMotion(_ format: MotionExportFormat) {
         guard motionExportState != .rendering else { return }
         guard rendererReady, let renderer else { return }
-        guard format != .livePhoto || viewAngleMode == .standard else {
-            motionExportFormat = format
-            motionExportFailureMessage = "Live Photo 仅支持标准模式"
-            motionExportState = .failed
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
-                guard self?.motionExportState == .failed else { return }
-                self?.motionExportState = .idle
-                self?.motionExportFormat = nil
-                self?.motionExportFailureMessage = nil
-            }
-            return
-        }
 
         let taskID = activeTaskID
         motionExportFormat = format
@@ -2055,6 +2043,7 @@ struct ContentView: View {
     @State private var resultMenuExpanded = false
     @State private var resultReplacementPending = false
     @State private var lensDockExpanded = false
+    @State private var motionExportMenuExpanded = false
     @State private var dollyZoomTask: Task<Void, Never>?
     @State private var dollyZoomRunning = false
     @State private var focusGeminiKeyWhenSettingsOpen = false
@@ -2129,6 +2118,7 @@ struct ContentView: View {
             if isGenerating {
                 showDragHint = false
                 lensDockExpanded = false
+                motionExportMenuExpanded = false
                 cancelDollyZoom(reset: false)
                 resultMenuExpanded = false
                 generationStartedAt = Date()
@@ -2137,6 +2127,7 @@ struct ContentView: View {
         .onChange(of: app.rendererReady) { _, ready in
             guard ready, app.inputImage != nil else {
                 lensDockExpanded = false
+                motionExportMenuExpanded = false
                 cancelDollyZoom(reset: true)
                 return
             }
@@ -2149,11 +2140,13 @@ struct ContentView: View {
                 comparisonWipePosition = 0.5
                 resultMenuExpanded = false
                 resultReplacementPending = false
+                motionExportMenuExpanded = false
                 return
             }
             showDragHint = false
             shutterMenuExpanded = false
             lensDockExpanded = false
+            motionExportMenuExpanded = false
             cancelDollyZoom(reset: false)
             resultMenuExpanded = false
             resultFlash = true
@@ -2178,6 +2171,7 @@ struct ContentView: View {
         }
         .onChange(of: app.motionExportState) { _, state in
             if state == .saved {
+                motionExportMenuExpanded = false
                 saveToastMessage = app.motionExportFormat?.savedMessage ?? "已保存到相册"
                 saveToastSystemImage = "checkmark"
                 withAnimation(.easeOut(duration: 0.20)) {
@@ -2490,6 +2484,25 @@ struct ContentView: View {
                 flowBottomAction(phase: phase, scale: scale)
             }
 
+            if phase == .compose, app.rendererReady, app.resultImage == nil {
+                lensFloatingButton(scale: scale)
+                    .position(
+                        x: size.width / 2 + stageSize.width / 2 - 28 * scale,
+                        y: photoTopInset + 28 * scale
+                    )
+                    .zIndex(6)
+            }
+
+            if motionExportMenuExpanded || app.motionExportState == .rendering {
+                motionExportDock(width: max(1, min(stageSize.width - 24 * scale, 318 * scale)), scale: scale)
+                    .position(x: size.width / 2, y: max(photoTopInset + 84 * scale, bottomActionTop - 102 * scale))
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .scale(scale: 0.96)).animation(.spring(response: 0.30, dampingFraction: 0.84)),
+                        removal: .opacity.animation(.easeOut(duration: 0.18))
+                    ))
+                    .zIndex(6)
+            }
+
             if lensDockExpanded, phase == .compose, app.rendererReady, app.resultImage == nil {
                 lensDock(width: max(1, min(stageSize.width - 24 * scale, 318 * scale)), scale: scale)
                     .position(x: size.width / 2, y: max(photoTopInset + 84 * scale, bottomActionTop - 102 * scale))
@@ -2753,6 +2766,7 @@ struct ContentView: View {
         resultMenuExpanded = false
         shutterMenuExpanded = false
         lensDockExpanded = false
+        motionExportMenuExpanded = false
         showDragHint = false
         saveToastVisible = false
         comparingResult = false
@@ -2780,14 +2794,15 @@ struct ContentView: View {
 
             Button {
                 withAnimation(.spring(response: 0.30, dampingFraction: 0.84)) {
-                    lensDockExpanded.toggle()
+                    motionExportMenuExpanded.toggle()
+                    lensDockExpanded = false
                     showDragHint = false
                 }
             } label: {
-                composeAuxiliaryButton(systemImage: "camera.aperture", title: "镜头", scale: scale)
+                composeAuxiliaryButton(systemImage: "square.and.arrow.up", title: "导出", scale: scale)
             }
             .buttonStyle(FluidPressButtonStyle(pressedScale: 0.94))
-            .accessibilityLabel(lensDockExpanded ? "收起镜头控制" : "打开镜头控制")
+            .accessibilityLabel(motionExportMenuExpanded ? "收起动效导出" : "打开动效导出")
             .offset(x: shutterMenuExpanded ? 88 * scale : 0, y: shutterMenuExpanded ? 0 : -2 * scale)
             .scaleEffect(shutterMenuExpanded ? 1 : 0.24)
             .opacity(shutterMenuExpanded ? 1 : 0)
@@ -2862,6 +2877,7 @@ struct ContentView: View {
         withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
             shutterMenuExpanded = false
             lensDockExpanded = false
+            motionExportMenuExpanded = false
         }
         cancelDollyZoom(reset: false)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
@@ -2902,6 +2918,7 @@ struct ContentView: View {
         app.cancelCurrentTaskAndClear()
         showDragHint = false
         lensDockExpanded = false
+        motionExportMenuExpanded = false
         cancelDollyZoom(reset: true)
         saveToastVisible = false
         comparingResult = false
@@ -2934,6 +2951,34 @@ struct ContentView: View {
                 .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.52))
         }
         .frame(width: 54 * scale, height: 66 * scale)
+    }
+
+    private func lensFloatingButton(scale: CGFloat) -> some View {
+        Button {
+            withAnimation(.spring(response: 0.30, dampingFraction: 0.84)) {
+                lensDockExpanded.toggle()
+                motionExportMenuExpanded = false
+                showDragHint = false
+            }
+        } label: {
+            Image(systemName: "camera.aperture")
+                .font(.system(size: 13 * scale, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(OpenReshotPalette.twilightText.opacity(lensDockExpanded ? 0.92 : 0.72))
+                .frame(width: 36 * scale, height: 36 * scale)
+                .background(OpenReshotPalette.twilightBottom.opacity(0.56), in: Circle())
+                .overlay(
+                    Circle()
+                        .strokeBorder(
+                            lensDockExpanded ? OpenReshotPalette.twilightAccent.opacity(0.82) : OpenReshotPalette.twilightText.opacity(0.18),
+                            lineWidth: 1
+                        )
+                )
+                .shadow(color: .black.opacity(0.24), radius: 12, y: 6)
+                .contentShape(Circle())
+        }
+        .buttonStyle(FluidPressButtonStyle(pressedScale: 0.90))
+        .accessibilityLabel(lensDockExpanded ? "收起镜头控制" : "打开镜头控制")
     }
 
     private func resetPhotoViewpoint() {
@@ -3055,8 +3100,6 @@ struct ContentView: View {
 
             lensAngleModeControl(scale: scale)
 
-            lensMotionExportControl(scale: scale)
-
             lensValueSlider(
                 systemImage: "scope",
                 leading: "对焦",
@@ -3151,52 +3194,102 @@ struct ContentView: View {
         .frame(height: 25 * scale)
     }
 
-    private func lensMotionExportControl(scale: CGFloat) -> some View {
-        HStack(spacing: 8 * scale) {
-            Image(systemName: "square.and.arrow.up")
-                .font(.system(size: 10.5 * scale, weight: .semibold))
-                .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.54))
-                .frame(width: 15 * scale)
+    private func motionExportDock(width: CGFloat, scale: CGFloat) -> some View {
+        VStack(spacing: 9 * scale) {
+            HStack(spacing: 8 * scale) {
+                Image(systemName: "livephoto")
+                    .font(.system(size: 12 * scale, weight: .semibold))
+                    .foregroundStyle(OpenReshotPalette.twilightAccent.opacity(0.92))
+                    .frame(width: 25 * scale, height: 25 * scale)
+                    .background(OpenReshotPalette.twilightText.opacity(0.08), in: Circle())
 
-            Text("导出")
-                .font(.system(size: 9 * scale, weight: .semibold, design: .rounded))
-                .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.47))
-                .frame(width: 30 * scale, alignment: .leading)
+                Text("动效导出")
+                    .font(.system(size: 11 * scale, weight: .bold, design: .rounded))
+                    .tracking(1.2)
+                    .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.80))
 
-            HStack(spacing: 4 * scale) {
-                ForEach(MotionExportFormat.allCases) { format in
-                    let enabled = motionExportEnabled(format)
-                    Button {
-                        app.exportMotion(format)
-                    } label: {
-                        HStack(spacing: 3 * scale) {
-                            Image(systemName: motionExportIcon(for: format))
-                                .font(.system(size: 8.5 * scale, weight: .semibold))
+                Spacer(minLength: 8 * scale)
 
-                            Text(motionExportTitle(for: format))
-                                .font(.system(size: 8.5 * scale, weight: .bold, design: .rounded))
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.78)
-                        }
-                        .foregroundStyle(enabled ? OpenReshotPalette.twilightText.opacity(0.72) : OpenReshotPalette.twilightText.opacity(0.26))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 23 * scale)
-                        .background(OpenReshotPalette.twilightText.opacity(enabled ? 0.075 : 0.035), in: Capsule())
+                Text(app.viewAngleMode.title)
+                    .font(.system(size: 10 * scale, weight: .semibold, design: .rounded))
+                    .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.58))
+                    .lineLimit(1)
+
+                Button {
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        motionExportMenuExpanded = false
                     }
-                    .disabled(!enabled)
-                    .buttonStyle(FluidPressButtonStyle(pressedScale: 0.96))
-                    .accessibilityLabel("导出\(format.title)")
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10 * scale, weight: .semibold))
+                        .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.70))
+                        .frame(width: 25 * scale, height: 25 * scale)
+                        .background(OpenReshotPalette.twilightText.opacity(0.07), in: Circle())
+                        .contentShape(Circle())
+                }
+                .buttonStyle(FluidPressButtonStyle(pressedScale: 0.90))
+                .accessibilityLabel("关闭动效导出")
+            }
+
+            HStack(spacing: 6 * scale) {
+                ForEach(MotionExportFormat.allCases) { format in
+                    motionExportFormatButton(format, scale: scale)
                 }
             }
+
+            if app.motionExportState == .rendering {
+                ProgressView(value: app.motionExportProgress)
+                    .tint(OpenReshotPalette.twilightAccent.opacity(0.92))
+                    .frame(height: 3 * scale)
+                    .clipShape(Capsule())
+            }
         }
-        .frame(height: 25 * scale)
+        .padding(.horizontal, 12 * scale)
+        .padding(.vertical, 11 * scale)
+        .frame(width: width)
+        .background(OpenReshotPalette.twilightBottom.opacity(0.58), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(OpenReshotPalette.twilightText.opacity(0.13), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.30), radius: 16, y: 8)
+    }
+
+    private func motionExportFormatButton(_ format: MotionExportFormat, scale: CGFloat) -> some View {
+        let enabled = motionExportEnabled(format)
+        let active = app.motionExportFormat == format && app.motionExportState == .rendering
+        return Button {
+            app.exportMotion(format)
+        } label: {
+            VStack(spacing: 5 * scale) {
+                Image(systemName: motionExportIcon(for: format))
+                    .font(.system(size: 13 * scale, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+
+                Text(motionExportTitle(for: format))
+                    .font(.system(size: 9 * scale, weight: .bold, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+            }
+            .foregroundStyle(enabled || active ? OpenReshotPalette.twilightText.opacity(0.76) : OpenReshotPalette.twilightText.opacity(0.26))
+            .frame(maxWidth: .infinity)
+            .frame(height: 50 * scale)
+            .background(
+                active ? OpenReshotPalette.twilightAccent.opacity(0.18) : OpenReshotPalette.twilightText.opacity(enabled ? 0.075 : 0.035),
+                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(active ? OpenReshotPalette.twilightAccent.opacity(0.40) : OpenReshotPalette.twilightText.opacity(0.07), lineWidth: 1)
+            )
+        }
+        .disabled(!enabled)
+        .buttonStyle(FluidPressButtonStyle(pressedScale: 0.96))
+        .accessibilityLabel("导出\(format.title)")
     }
 
     private func motionExportEnabled(_ format: MotionExportFormat) -> Bool {
         guard app.motionExportState != .rendering, app.rendererReady, app.resultImage == nil else { return false }
-        if format == .livePhoto {
-            return app.viewAngleMode == .standard
-        }
         return true
     }
 
