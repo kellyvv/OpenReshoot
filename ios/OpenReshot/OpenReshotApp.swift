@@ -2240,7 +2240,7 @@ struct ContentView: View {
 
                 emptyHomeStage(width: stageWidth, height: stageHeight)
 
-                Text("换个机位，再拍一次")
+                Text("换个机位，开始拍摄")
                     .font(.system(size: 15 * scale, weight: .medium, design: .rounded))
                     .tracking(-0.2)
                     .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.60))
@@ -2473,7 +2473,13 @@ struct ContentView: View {
 
                 twilightPhotoStage(width: stageSize.width, height: stageSize.height)
                     .overlay(alignment: .bottom) {
-                        photoStageCaption(phase: phase, scale: scale)
+                        VStack(spacing: 8 * scale) {
+                            if phase == .compose, app.rendererReady, app.resultImage == nil {
+                                lensParameterChip(scale: scale)
+                            }
+                            photoStageCaption(phase: phase, scale: scale)
+                        }
+                        .padding(.bottom, 12 * scale)
                     }
 
                 Spacer(minLength: 0)
@@ -2482,15 +2488,6 @@ struct ContentView: View {
 
             bottomActionLayer(size: size, scale: scale) {
                 flowBottomAction(phase: phase, scale: scale)
-            }
-
-            if phase == .compose, app.rendererReady, app.resultImage == nil {
-                lensFloatingButton(scale: scale)
-                    .position(
-                        x: size.width / 2 + stageSize.width / 2 - 28 * scale,
-                        y: photoTopInset + 28 * scale
-                    )
-                    .zIndex(6)
             }
 
             if motionExportMenuExpanded || app.motionExportState == .rendering {
@@ -2644,7 +2641,7 @@ struct ContentView: View {
         case .missingAPIKey:
             return "输入 Gemini API Key"
         case .enhancement:
-            return "重试重拍"
+            return "重新拍摄"
         case .imageLoad:
             return "重新选择照片"
         case .missingModel:
@@ -2693,9 +2690,9 @@ struct ContentView: View {
     private var failedCaption: String {
         switch app.processFailureKind {
         case .missingAPIKey:
-            return "需要输入 API Key 后重拍"
+            return "需要输入 API Key 后拍摄"
         case .enhancement:
-            return "重拍失败,请检查网络后重试"
+            return "拍摄失败,请检查网络后重试"
         case .imageLoad:
             return "载入失败,请重新选择照片"
         case .missingModel:
@@ -2832,7 +2829,7 @@ struct ContentView: View {
                         }
                 )
                 .buttonStyle(FluidPressButtonStyle(pressedScale: 0.93))
-                .accessibilityLabel("重拍照片")
+                .accessibilityLabel("开始拍摄")
 
                 Text(flowRingLabel(for: .compose))
                     .font(.system(size: 10 * scale, weight: .semibold, design: .rounded))
@@ -2953,7 +2950,7 @@ struct ContentView: View {
         .frame(width: 54 * scale, height: 66 * scale)
     }
 
-    private func lensFloatingButton(scale: CGFloat) -> some View {
+    private func lensParameterChip(scale: CGFloat) -> some View {
         Button {
             withAnimation(.spring(response: 0.30, dampingFraction: 0.84)) {
                 lensDockExpanded.toggle()
@@ -2961,21 +2958,29 @@ struct ContentView: View {
                 showDragHint = false
             }
         } label: {
-            Image(systemName: "camera.aperture")
-                .font(.system(size: 13 * scale, weight: .semibold))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(OpenReshotPalette.twilightText.opacity(lensDockExpanded ? 0.92 : 0.72))
-                .frame(width: 36 * scale, height: 36 * scale)
-                .background(OpenReshotPalette.twilightBottom.opacity(0.56), in: Circle())
-                .overlay(
-                    Circle()
-                        .strokeBorder(
-                            lensDockExpanded ? OpenReshotPalette.twilightAccent.opacity(0.82) : OpenReshotPalette.twilightText.opacity(0.18),
-                            lineWidth: 1
-                        )
-                )
-                .shadow(color: .black.opacity(0.24), radius: 12, y: 6)
-                .contentShape(Circle())
+            HStack(spacing: 7 * scale) {
+                Image(systemName: "camera.aperture")
+                    .font(.system(size: 11 * scale, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+
+                Text("\(app.viewAngleMode.title) · \(lensFocusLabel) · \(lensFNumberLabel)")
+                    .font(.system(size: 10 * scale, weight: .bold, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.86)
+            }
+            .foregroundStyle(OpenReshotPalette.twilightText.opacity(lensDockExpanded ? 0.92 : 0.72))
+            .padding(.horizontal, 12 * scale)
+            .frame(height: 30 * scale)
+            .background(OpenReshotPalette.twilightBottom.opacity(0.52), in: Capsule())
+            .overlay(
+                Capsule()
+                    .strokeBorder(
+                        lensDockExpanded ? OpenReshotPalette.twilightAccent.opacity(0.72) : OpenReshotPalette.twilightText.opacity(0.16),
+                        lineWidth: 1
+                    )
+            )
+            .shadow(color: .black.opacity(0.22), radius: 12, y: 6)
+            .contentShape(Capsule())
         }
         .buttonStyle(FluidPressButtonStyle(pressedScale: 0.90))
         .accessibilityLabel(lensDockExpanded ? "收起镜头控制" : "打开镜头控制")
@@ -3470,7 +3475,6 @@ struct ContentView: View {
                 .padding(.horizontal, 13 * scale)
                 .frame(height: 28 * scale)
                 .background(OpenReshotPalette.twilightBottom.opacity(0.42), in: Capsule())
-                .padding(.bottom, 12 * scale)
         }
     }
 
@@ -3498,9 +3502,9 @@ struct ContentView: View {
         case .failed:
             return failedRetryLabel
         case .compose:
-            return "再拍一次"
+            return "开始拍摄"
         case .generating:
-            return "正在重拍"
+            return "正在拍摄"
         case .result:
             return ""
         }
