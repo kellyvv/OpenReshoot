@@ -423,8 +423,7 @@ final class AppState: ObservableObject {
     private var lensDefaultFocusDepth: Float = 1
     private static let geminiInputMaxSide: CGFloat = 1024
     private static let motionExportFPS = 24
-    private static let motionExportFrameCount = 64
-    private static let livePhotoExportFrameCount = 96
+    private static let motionExportFrameCount = 96
     private static let livePhotoStillFrameIndex = 0
     private static let motionExportMaxLongSide: CGFloat = 960
     private static let geminiModel = "gemini-3.1-flash-image"
@@ -1333,14 +1332,13 @@ final class AppState: ObservableObject {
         return Self.watermarkedExportFrame(frame)
     }
 
-    private func motionFramePlan(for format: MotionExportFormat) -> MotionFramePlan {
-        let tiltRange = format == .livePhoto ? ReshotViewAngleMode.standard.exportTiltRange : viewAngleMode.exportTiltRange
+    private func motionFramePlan(for _: MotionExportFormat) -> MotionFramePlan {
         return MotionFramePlan(
             size: Self.motionExportSize(for: imageAspect),
             fps: Self.motionExportFPS,
-            frameCount: format == .livePhoto ? Self.livePhotoExportFrameCount : Self.motionExportFrameCount,
-            tiltRange: tiltRange,
-            path: format == .livePhoto ? .centerOrbit(clockwise: true) : .shuttle
+            frameCount: Self.motionExportFrameCount,
+            tiltRange: ReshotViewAngleMode.standard.exportTiltRange,
+            path: .centerOrbit(clockwise: true)
         )
     }
 

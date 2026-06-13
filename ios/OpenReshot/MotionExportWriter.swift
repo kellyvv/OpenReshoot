@@ -15,7 +15,6 @@ struct MotionExportPackage {
 
 struct MotionFramePlan {
     enum Path {
-        case shuttle
         case centerOrbit(clockwise: Bool)
     }
 
@@ -31,23 +30,9 @@ struct MotionFramePlan {
 
     func tilt(at index: Int) -> SIMD2<Float> {
         switch path {
-        case .shuttle:
-            return shuttleTilt(at: index)
         case .centerOrbit(let clockwise):
             return centerOrbitTilt(at: index, clockwise: clockwise)
         }
-    }
-
-    private func shuttleTilt(at index: Int) -> SIMD2<Float> {
-        let progress = Float(index) / Float(max(frameCount - 1, 1))
-        let x: Float
-        if progress < 0.46 {
-            x = interpolate(from: -tiltRange, to: tiltRange, progress: progress / 0.46)
-        } else {
-            x = interpolate(from: tiltRange, to: 0, progress: (progress - 0.46) / 0.54)
-        }
-        let y = sin(progress * .pi * 2) * tiltRange * 0.06
-        return SIMD2(x, y)
     }
 
     private func centerOrbitTilt(at index: Int, clockwise: Bool) -> SIMD2<Float> {
@@ -58,16 +43,6 @@ struct MotionFramePlan {
         let direction: Float = clockwise ? -1 : 1
         let angle = (-.pi / 2) + direction * progress * .pi * 2 * 0.86
         return SIMD2(cos(angle) * radius, sin(angle) * radius)
-    }
-
-    private func interpolate(from start: Float, to end: Float, progress: Float) -> Float {
-        let t = min(max(progress, 0), 1)
-        return start + (end - start) * smoothStep(t)
-    }
-
-    private func smoothStep(_ value: Float) -> Float {
-        let t = min(max(value, 0), 1)
-        return t * t * (3 - 2 * t)
     }
 
     private func easeOut(_ value: Float) -> Float {
