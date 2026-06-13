@@ -777,9 +777,7 @@ final class AppState: ObservableObject {
     @MainActor
     func updateSheen(for tilt: SIMD2<Float>) {
         motionTilt = tilt
-        sheenAmount = min(1, CGFloat(simd_length(tilt)))
-        sheenTiltX = CGFloat(tilt.x)
-        sheenTiltY = CGFloat(tilt.y)
+        refreshSheenState()
     }
 
     @MainActor
@@ -790,6 +788,7 @@ final class AppState: ObservableObject {
             lensFNumber = 4
         }
         renderer?.setLens(focusDepth: lensFocusDepth, fNumber: lensFNumber, dolly: lensDolly)
+        refreshSheenState()
     }
 
     @MainActor
@@ -802,6 +801,20 @@ final class AppState: ObservableObject {
     func setLensDolly(_ value: Float) {
         lensDolly = min(max(value, lensDollyRange.lowerBound), lensDollyRange.upperBound)
         renderer?.setLens(dolly: lensDolly)
+        refreshSheenState()
+    }
+
+    @MainActor
+    private func refreshSheenState() {
+        let tiltAmount = CGFloat(simd_length(motionTilt))
+        let dollyExtent = max(abs(lensDollyRange.lowerBound), abs(lensDollyRange.upperBound), 0.001)
+        let dolly = CGFloat(lensDolly / dollyExtent)
+        let dollyAmount = min(1, abs(dolly))
+        let dollyDirection = dolly == 0 ? CGFloat(0) : (dolly > 0 ? CGFloat(1) : CGFloat(-1))
+
+        sheenAmount = min(1, max(tiltAmount, dollyAmount * 0.95))
+        sheenTiltX = CGFloat(motionTilt.x) + dollyDirection * dollyAmount * 0.55
+        sheenTiltY = CGFloat(motionTilt.y) + dollyAmount * 0.18
     }
 
     @MainActor
