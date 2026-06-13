@@ -21,7 +21,7 @@
 	<key>CFBundleVersion</key>
 	<string>2</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Save the reconstructed photo to your library.</string>
+	<string>Save reconstructed photos, motion videos, GIFs, and Live Photos to your library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Pick a photo to turn into a 3D parallax view.</string>
 	<key>OpenReshotModelDownloadBaseURL</key>

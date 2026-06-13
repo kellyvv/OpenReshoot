@@ -34,6 +34,7 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
     private var lensFocusDepth: Float = 1
     private var lensFNumber: Float = 16
     private var lensDolly: Float = 0
+    private var motionRangeScale: Float = 1
     private var amplitude = SIMD2<Float>(0.06, 0.04)
     private var renderTargetSize = MTLSize(width: 0, height: 0, depth: 1)
     private var colorTarget: MTLTexture?
@@ -94,7 +95,7 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
         lensFocusDepth = focus
         lensFNumber = 16
         lensDolly = 0
-        amplitude = SIMD2(min(0.46, focus * 0.19), min(0.30, focus * 0.13))
+        refreshMotionAmplitude()
         print("🎛️ [OpenReshot] motion amplitude x=\(amplitude.x), y=\(amplitude.y), focus=\(focus)")
         guard let view else { return false }
         let cf = view.colorPixelFormat, sc = view.sampleCount
@@ -155,7 +156,7 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
         lensFocusDepth = focus
         lensFNumber = 16
         lensDolly = 0
-        amplitude = SIMD2(min(0.46, focus * 0.19), min(0.30, focus * 0.13))
+        refreshMotionAmplitude()
         print("🎛️ [OpenReshot] demo motion amplitude x=\(amplitude.x), y=\(amplitude.y), focus=\(focus)")
         guard let view else { return false }
         let cf = view.colorPixelFormat, sc = view.sampleCount
@@ -230,6 +231,12 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
         startSmoothing()
     }
 
+    func setMotionRangeScale(_ scale: Float) {
+        motionRangeScale = min(max(scale, 0.2), 1.2)
+        refreshMotionAmplitude()
+        view?.setNeedsDisplay()
+    }
+
     private func startSmoothing() {
         guard displayLink == nil else { return }
         let link = CADisplayLink(target: self, selector: #selector(stepPhotoMotion(_:)))
@@ -243,6 +250,15 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
         displayLink = nil
     }
 
+    private func refreshMotionAmplitude() {
+        amplitude = Self.motionAmplitude(for: focus, scale: motionRangeScale)
+    }
+
+    private static func motionAmplitude(for focus: Float, scale: Float) -> SIMD2<Float> {
+        let amount = min(0.46, focus * 0.19) * scale
+        return SIMD2(amount, amount)
+    }
+
     @objc private func stepPhotoMotion(_ link: CADisplayLink) {
         let delta = targetTilt - tilt
         tilt += delta * 0.15
@@ -253,7 +269,7 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
         view?.setNeedsDisplay()
     }
 
-    private func cameraEye() -> SIMD3<Float> {
+    private func cameraEye(for tilt: SIMD2<Float>) -> SIMD3<Float> {
         SIMD3<Float>(amplitude.x * tilt.x, amplitude.y * tilt.y, lensDolly)
     }
 
@@ -261,13 +277,13 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
         SIMD3<Float>(0, 0, max(Self.nearPlane, lensFocusDepth))
     }
 
-    private func currentFocusDistance() -> Float {
-        max(Self.nearPlane, simd_length(focusTarget() - cameraEye()))
+    private func currentFocusDistance(for tilt: SIMD2<Float>) -> Float {
+        max(Self.nearPlane, simd_length(focusTarget() - cameraEye(for: tilt)))
     }
 
     /// OpenCV-space parallax look-at, then flip into MetalSplatter's right-hand / Y-up space.
-    private func viewMatrix() -> simd_float4x4 {
-        let eye = cameraEye()
+    private func viewMatrix(for tilt: SIMD2<Float>) -> simd_float4x4 {
+        let eye = cameraEye(for: tilt)
         let up = SIMD3<Float>(0, -1, 0)
         let front = simd_normalize(focusTarget() - eye)
         let right = simd_normalize(simd_cross(front, up))
@@ -305,6 +321,135 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
         }
     }
 
+    func renderMotionFrame(tilt frameTilt: SIMD2<Float>, size: CGSize) throws -> UIImage {
+        guard let splat, splat.isReadyToRender else {
+            throw NSError(domain: "OpenReshot", code: -2001, userInfo: [NSLocalizedDescriptionKey: "Renderer is not ready"])
+        }
+        let width = max(2, Int(size.width.rounded(.toNearestOrAwayFromZero)))
+        let height = max(2, Int(size.height.rounded(.toNearestOrAwayFromZero)))
+
+        let colorDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm_srgb,
+            width: width,
+            height: height,
+            mipmapped: false
+        )
+        colorDescriptor.usage = [.renderTarget, .shaderRead]
+        colorDescriptor.storageMode = .private
+        guard let colorTexture = device.makeTexture(descriptor: colorDescriptor) else {
+            throw NSError(domain: "OpenReshot", code: -2002, userInfo: [NSLocalizedDescriptionKey: "Failed to create export color texture"])
+        }
+
+        let depthDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: Self.splatDepthFormat,
+            width: width,
+            height: height,
+            mipmapped: false
+        )
+        depthDescriptor.usage = [.renderTarget, .shaderRead]
+        depthDescriptor.storageMode = .private
+        guard let depthTexture = device.makeTexture(descriptor: depthDescriptor) else {
+            throw NSError(domain: "OpenReshot", code: -2003, userInfo: [NSLocalizedDescriptionKey: "Failed to create export depth texture"])
+        }
+
+        let outputDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm_srgb,
+            width: width,
+            height: height,
+            mipmapped: false
+        )
+        outputDescriptor.usage = [.renderTarget, .shaderRead]
+        outputDescriptor.storageMode = .private
+        guard let outputTexture = device.makeTexture(descriptor: outputDescriptor) else {
+            throw NSError(domain: "OpenReshot", code: -2004, userInfo: [NSLocalizedDescriptionKey: "Failed to create export output texture"])
+        }
+
+        let bytesPerRow = width * 4
+        guard let readBuffer = device.makeBuffer(length: bytesPerRow * height, options: [.storageModeShared]) else {
+            throw NSError(domain: "OpenReshot", code: -2005, userInfo: [NSLocalizedDescriptionKey: "Failed to create export read buffer"])
+        }
+
+        guard inFlight.wait(timeout: .now()) == .success else {
+            throw NSError(domain: "OpenReshot", code: -2006, userInfo: [NSLocalizedDescriptionKey: "Renderer is busy"])
+        }
+        guard let cmd = queue.makeCommandBuffer() else {
+            inFlight.signal()
+            throw NSError(domain: "OpenReshot", code: -2007, userInfo: [NSLocalizedDescriptionKey: "Failed to create export command buffer"])
+        }
+        cmd.addCompletedHandler { [inFlight] _ in inFlight.signal() }
+
+        let viewport = SplatRenderer.ViewportDescriptor(
+            viewport: MTLViewport(originX: 0, originY: 0, width: Double(width), height: Double(height), znear: 0, zfar: 1),
+            projectionMatrix: projection(aspect: Float(width) / Float(height)),
+            viewMatrix: viewMatrix(for: frameTilt),
+            screenSize: SIMD2(width, height)
+        )
+        let rendered = try splat.render(viewports: [viewport],
+                                        colorTexture: colorTexture,
+                                        colorStoreAction: .store,
+                                        depthTexture: depthTexture,
+                                        rasterizationRateMap: nil,
+                                        renderTargetArrayLength: 0,
+                                        accessTimeout: 0,
+                                        sortTimeout: 0,
+                                        to: cmd)
+        guard rendered else {
+            throw NSError(domain: "OpenReshot", code: -2008, userInfo: [NSLocalizedDescriptionKey: "Export render skipped"])
+        }
+
+        do {
+            try encodeLensPass(colorTexture: colorTexture,
+                               depthTexture: depthTexture,
+                               destinationTexture: outputTexture,
+                               focusDistance: currentFocusDistance(for: frameTilt),
+                               commandBuffer: cmd)
+        } catch {
+            print("❌ [OpenReshot] export lens pass error: \(error)")
+            copyColorTarget(colorTexture, to: outputTexture, commandBuffer: cmd)
+        }
+
+        guard let blit = cmd.makeBlitCommandEncoder() else {
+            throw NSError(domain: "OpenReshot", code: -2009, userInfo: [NSLocalizedDescriptionKey: "Failed to create export blit encoder"])
+        }
+        blit.copy(from: outputTexture,
+                  sourceSlice: 0,
+                  sourceLevel: 0,
+                  sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                  sourceSize: MTLSize(width: width, height: height, depth: 1),
+                  to: readBuffer,
+                  destinationOffset: 0,
+                  destinationBytesPerRow: bytesPerRow,
+                  destinationBytesPerImage: bytesPerRow * height)
+        blit.endEncoding()
+        cmd.commit()
+        cmd.waitUntilCompleted()
+
+        if let error = cmd.error {
+            throw error
+        }
+
+        let data = Data(bytes: readBuffer.contents(), count: bytesPerRow * height)
+        guard let provider = CGDataProvider(data: data as CFData) else {
+            throw NSError(domain: "OpenReshot", code: -2010, userInfo: [NSLocalizedDescriptionKey: "Failed to create export data provider"])
+        }
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue)
+            .union(.byteOrder32Little)
+        guard let cgImage = CGImage(width: width,
+                                    height: height,
+                                    bitsPerComponent: 8,
+                                    bitsPerPixel: 32,
+                                    bytesPerRow: bytesPerRow,
+                                    space: CGColorSpaceCreateDeviceRGB(),
+                                    bitmapInfo: bitmapInfo,
+                                    provider: provider,
+                                    decode: nil,
+                                    shouldInterpolate: false,
+                                    intent: .defaultIntent) else {
+            throw NSError(domain: "OpenReshot", code: -2011, userInfo: [NSLocalizedDescriptionKey: "Failed to create export image"])
+        }
+        return UIImage(cgImage: cgImage, scale: 1, orientation: .up)
+    }
+
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
     func draw(in view: MTKView) {
@@ -333,7 +478,7 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
         let vp = SplatRenderer.ViewportDescriptor(
             viewport: MTLViewport(originX: 0, originY: 0, width: Double(w), height: Double(h), znear: 0, zfar: 1),
             projectionMatrix: projection(aspect: Float(w / h)),
-            viewMatrix: viewMatrix(),
+            viewMatrix: viewMatrix(for: tilt),
             screenSize: SIMD2(Int(w), Int(h)))
         do {
             let ok = try splat.render(viewports: [vp],
@@ -350,6 +495,7 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
                     try encodeLensPass(colorTexture: colorTarget,
                                        depthTexture: depthTarget,
                                        drawable: drawable,
+                                       focusDistance: currentFocusDistance(for: tilt),
                                        commandBuffer: cmd)
                 } catch {
                     print("❌ [OpenReshot] lens pass error: \(error)")
@@ -399,6 +545,7 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
         colorTexture: MTLTexture,
         depthTexture: MTLTexture,
         drawable: CAMetalDrawable,
+        focusDistance: Float,
         commandBuffer: MTLCommandBuffer
     ) throws {
         try buildLensPipelineIfNeeded(colorFormat: drawable.texture.pixelFormat)
@@ -419,7 +566,44 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
         encoder.setFragmentTexture(depthTexture, index: 1)
         var uniforms = LensUniforms(
             texelSize: SIMD2(1 / Float(max(colorTexture.width, 1)), 1 / Float(max(colorTexture.height, 1))),
-            focusDistance: currentFocusDistance(),
+            focusDistance: focusDistance,
+            fNumber: lensFNumber,
+            maxRadius: 28,
+            nearPlane: Self.nearPlane,
+            farPlane: Self.farPlane,
+            blurScale: lensFNumber >= 15.9 ? 0 : 1
+        )
+        encoder.setFragmentBytes(&uniforms, length: MemoryLayout<LensUniforms>.stride, index: 0)
+        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        encoder.endEncoding()
+    }
+
+    private func encodeLensPass(
+        colorTexture: MTLTexture,
+        depthTexture: MTLTexture,
+        destinationTexture: MTLTexture,
+        focusDistance: Float,
+        commandBuffer: MTLCommandBuffer
+    ) throws {
+        try buildLensPipelineIfNeeded(colorFormat: destinationTexture.pixelFormat)
+        guard let lensPipelineState else {
+            copyColorTarget(colorTexture, to: destinationTexture, commandBuffer: commandBuffer)
+            return
+        }
+
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = destinationTexture
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].storeAction = .store
+        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else { return }
+        encoder.label = "OpenReshot Export Lens DOF"
+        encoder.setRenderPipelineState(lensPipelineState)
+        encoder.setFragmentTexture(colorTexture, index: 0)
+        encoder.setFragmentTexture(depthTexture, index: 1)
+        var uniforms = LensUniforms(
+            texelSize: SIMD2(1 / Float(max(colorTexture.width, 1)), 1 / Float(max(colorTexture.height, 1))),
+            focusDistance: focusDistance,
             fNumber: lensFNumber,
             maxRadius: 28,
             nearPlane: Self.nearPlane,

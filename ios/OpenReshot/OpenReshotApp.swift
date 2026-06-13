@@ -3,10 +3,12 @@ import Foundation
 import Photos
 import PhotosUI
 import MetalKit
+import AVFoundation
 import CoreML
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import ImageIO
+import UniformTypeIdentifiers
 import Vision
 import simd
 import SplatIO
@@ -66,11 +68,78 @@ enum RenderQuality: String, CaseIterable, Identifiable {
 
 }
 
+enum ReshotViewAngleMode: String, CaseIterable, Identifiable {
+    case standard
+    case wide
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .standard: return "标准"
+        case .wide: return "大角度"
+        }
+    }
+
+    var motionScale: Float {
+        switch self {
+        case .standard: return 0.58
+        case .wide: return 1.0
+        }
+    }
+
+    var exportTiltRange: Float {
+        switch self {
+        case .standard: return 0.46
+        case .wide: return 0.72
+        }
+    }
+}
+
 enum SaveState {
     case idle
     case saving
     case saved
     case failed
+}
+
+enum MotionExportState {
+    case idle
+    case rendering
+    case saved
+    case failed
+}
+
+enum MotionExportFormat: String, CaseIterable, Identifiable {
+    case mp4
+    case livePhoto
+    case gif
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .mp4: return "MP4"
+        case .livePhoto: return "Live"
+        case .gif: return "GIF"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .mp4: return "play.rectangle"
+        case .livePhoto: return "livephoto"
+        case .gif: return "sparkles.rectangle.stack"
+        }
+    }
+
+    var savedMessage: String {
+        switch self {
+        case .mp4: return "MP4 已保存"
+        case .livePhoto: return "Live Photo 已保存"
+        case .gif: return "GIF 已保存"
+        }
+    }
 }
 
 enum ProcessFailureKind: Equatable {
@@ -319,6 +388,10 @@ final class AppState: ObservableObject {
     @Published var capturedFrame: UIImage?
     @Published var resultImage: UIImage?
     @Published var saveState: SaveState = .idle
+    @Published var motionExportState: MotionExportState = .idle
+    @Published var motionExportFormat: MotionExportFormat?
+    @Published var motionExportProgress: Double = 0
+    @Published var motionExportFailureMessage: String?
     @Published var subjectProtectionMask: UIImage?
     @Published var geminiKey: String
     @Published var hasExportablePreview = false
@@ -327,6 +400,7 @@ final class AppState: ObservableObject {
     @Published var lensFocusMax: Float = 4
     @Published var lensFNumber: Float = 16
     @Published var lensDolly: Float = 0
+    @Published var viewAngleMode: ReshotViewAngleMode = .wide
     @Published var galleryItems: [ReshotCacheItem] = []
     let modelStore = ReconstructionModelStore()
     var renderer: ReshootRenderer?
@@ -338,6 +412,7 @@ final class AppState: ObservableObject {
     private var subjectMaskRequestID = UUID()
     private var reconstructionRequestID = UUID()
     private var enhanceTask: Task<Void, Never>?
+    private var motionExportTask: Task<Void, Never>?
     private var currentCloudPoints: [SplatPoint]?
     private var currentPreviewMetadata: PreviewExportMetadata?
     private var activeCacheItemID: String?
@@ -347,6 +422,9 @@ final class AppState: ObservableObject {
     private var didStartDemoModelPrefetch = false
     private var lensDefaultFocusDepth: Float = 1
     private static let geminiInputMaxSide: CGFloat = 1024
+    private static let motionExportFPS = 24
+    private static let motionExportFrameCount = 64
+    private static let motionExportMaxLongSide: CGFloat = 960
     private static let geminiModel = "gemini-3.1-flash-image"
     private static let demoSceneResource = "DemoFLOW"
     private static let demoSceneFocalPixels: Float = 1330.3168
@@ -389,6 +467,7 @@ final class AppState: ObservableObject {
     @MainActor
     func attachRenderer(_ renderer: ReshootRenderer) {
         self.renderer = renderer
+        renderer.setMotionRangeScale(viewAngleMode.motionScale)
         renderer.onReady = { [weak self] in
             guard let self, self.inputImage != nil else { return }
             self.rendererReady = true
@@ -726,6 +805,12 @@ final class AppState: ObservableObject {
     }
 
     @MainActor
+    func setViewAngleMode(_ mode: ReshotViewAngleMode) {
+        viewAngleMode = mode
+        renderer?.setMotionRangeScale(mode.motionScale)
+    }
+
+    @MainActor
     func resetLensControlsToDefault() {
         let focus = min(max(lensDefaultFocusDepth, lensFocusMin), lensFocusMax)
         resetLensControls(focus: focus)
@@ -804,6 +889,10 @@ final class AppState: ObservableObject {
     func closeResult() {
         resultImage = nil
         saveState = .idle
+        motionExportState = .idle
+        motionExportFormat = nil
+        motionExportProgress = 0
+        motionExportFailureMessage = nil
     }
 
     @MainActor
@@ -818,6 +907,8 @@ final class AppState: ObservableObject {
         subjectMaskRequestID = taskID
         enhanceTask?.cancel()
         enhanceTask = nil
+        motionExportTask?.cancel()
+        motionExportTask = nil
         renderer?.clearCloud()
         demoScenePending = false
         pendingCachedReshot = nil
@@ -847,6 +938,10 @@ final class AppState: ObservableObject {
         capturedFrame = nil
         resultImage = nil
         saveState = .idle
+        motionExportState = .idle
+        motionExportFormat = nil
+        motionExportProgress = 0
+        motionExportFailureMessage = nil
         subjectProtectionMask = nil
     }
 
@@ -900,6 +995,8 @@ final class AppState: ObservableObject {
         currentSourceData = sourceData ?? (try? Data(contentsOf: sourceURL))
         enhanceTask?.cancel()
         enhanceTask = nil
+        motionExportTask?.cancel()
+        motionExportTask = nil
         renderer?.clearCloud()
         demoScenePending = false
         previewMode = false
@@ -922,6 +1019,10 @@ final class AppState: ObservableObject {
         capturedFrame = nil
         resultImage = nil
         saveState = .idle
+        motionExportState = .idle
+        motionExportFormat = nil
+        motionExportProgress = 0
+        motionExportFailureMessage = nil
         subjectProtectionMask = nil
         status = ""
         resetLensControls(focus: item.focus)
@@ -964,6 +1065,8 @@ final class AppState: ObservableObject {
         // Default preview must stay sharp; f/16 disables the DOF shader blur.
         lensFNumber = 16
         lensDolly = 0
+        viewAngleMode = .wide
+        renderer?.setMotionRangeScale(viewAngleMode.motionScale)
         renderer?.setLens(focusDepth: lensFocusDepth, fNumber: lensFNumber, dolly: lensDolly)
     }
 
@@ -1080,6 +1183,365 @@ final class AppState: ObservableObject {
                         guard self?.activeTaskID == taskID, self?.saveState == .failed else { return }
                         self?.saveState = .idle
                     }
+                }
+            }
+        }
+    }
+
+    @MainActor
+    func exportMotion(_ format: MotionExportFormat) {
+        guard motionExportState != .rendering else { return }
+        guard rendererReady, let renderer else { return }
+        guard format != .livePhoto || viewAngleMode == .standard else {
+            motionExportFormat = format
+            motionExportFailureMessage = "Live Photo 仅支持标准模式"
+            motionExportState = .failed
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
+                guard self?.motionExportState == .failed else { return }
+                self?.motionExportState = .idle
+                self?.motionExportFormat = nil
+                self?.motionExportFailureMessage = nil
+            }
+            return
+        }
+
+        let taskID = activeTaskID
+        motionExportFormat = format
+        motionExportState = .rendering
+        motionExportProgress = 0
+        motionExportFailureMessage = nil
+
+        motionExportTask?.cancel()
+        motionExportTask = Task { @MainActor [weak self, renderer, taskID, format] in
+            guard let self else { return }
+            do {
+                let package = try await self.renderMotionExportPackage(format: format, renderer: renderer)
+                if format == .livePhoto {
+                    try await Self.validateLivePhotoPackage(package)
+                }
+                try await Self.saveMotionExportPackage(package)
+                guard self.activeTaskID == taskID else { return }
+                self.motionExportProgress = 1
+                self.motionExportState = .saved
+                self.motionExportFailureMessage = nil
+                self.motionExportTask = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) { [weak self] in
+                    guard self?.activeTaskID == taskID, self?.motionExportState == .saved else { return }
+                    self?.motionExportState = .idle
+                    self?.motionExportFormat = nil
+                    self?.motionExportProgress = 0
+                    self?.motionExportFailureMessage = nil
+                }
+            } catch is CancellationError {
+                guard self.activeTaskID == taskID else { return }
+                self.motionExportState = .idle
+                self.motionExportFormat = nil
+                self.motionExportProgress = 0
+                self.motionExportFailureMessage = nil
+                self.motionExportTask = nil
+            } catch {
+                guard self.activeTaskID == taskID else { return }
+                print("❌ [OpenReshot] motion export error: \(error)")
+                self.motionExportFailureMessage = Self.motionExportFailureMessage(format: format, error: error)
+                self.motionExportState = .failed
+                self.motionExportTask = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) { [weak self] in
+                    guard self?.activeTaskID == taskID, self?.motionExportState == .failed else { return }
+                    self?.motionExportState = .idle
+                    self?.motionExportFormat = nil
+                    self?.motionExportProgress = 0
+                    self?.motionExportFailureMessage = nil
+                }
+            }
+        }
+    }
+
+    private static func motionExportFailureMessage(format: MotionExportFormat, error: Error) -> String {
+        if format == .livePhoto {
+            return "Live Photo 配对失败"
+        }
+        if error is CancellationError {
+            return "导出已取消"
+        }
+        return "\(format.title) 导出失败"
+    }
+
+    @MainActor
+    private func renderMotionExportPackage(format: MotionExportFormat, renderer: ReshootRenderer) async throws -> MotionExportPackage {
+        let plan = motionFramePlan()
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("OpenReshotMotion-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        switch format {
+        case .gif:
+            let gifURL = directory.appendingPathComponent("OpenReshot.gif")
+            let destination = try MotionGIFWriter.makeDestination(url: gifURL, frameCount: plan.frameCount)
+            for frameIndex in 0..<plan.frameCount {
+                try Task.checkCancellation()
+                let frame = try motionExportFrame(renderer: renderer, plan: plan, frameIndex: frameIndex)
+                try MotionGIFWriter.addFrame(frame, to: destination, delay: plan.frameDuration)
+                motionExportProgress = Double(frameIndex + 1) / Double(plan.frameCount) * 0.92
+                if frameIndex % 4 == 0 {
+                    await Task.yield()
+                }
+            }
+            try MotionGIFWriter.finalize(destination)
+            return MotionExportPackage(format: .gif, videoURL: nil, gifURL: gifURL, livePhotoImageURL: nil, livePhotoVideoURL: nil)
+
+        case .mp4, .livePhoto:
+            let livePhotoIdentifier = format == .livePhoto ? "OpenReshot.\(UUID().uuidString)" : nil
+            let videoURL = directory.appendingPathComponent(format == .livePhoto ? "OpenReshot.mov" : "OpenReshot.mp4")
+            let writer = try MotionVideoWriter(
+                url: videoURL,
+                fileType: format == .livePhoto ? .mov : .mp4,
+                size: plan.size,
+                fps: plan.fps,
+                contentIdentifier: livePhotoIdentifier,
+                stillImageFrameIndex: format == .livePhoto ? plan.frameCount - 1 : nil
+            )
+            for frameIndex in 0..<plan.frameCount {
+                try Task.checkCancellation()
+                let frame = try motionExportFrame(renderer: renderer, plan: plan, frameIndex: frameIndex)
+                try await writer.append(frame, frameIndex: frameIndex)
+                motionExportProgress = Double(frameIndex + 1) / Double(plan.frameCount) * 0.92
+                if frameIndex % 4 == 0 {
+                    await Task.yield()
+                }
+            }
+            try await writer.finish()
+
+            guard format == .livePhoto else {
+                return MotionExportPackage(format: .mp4, videoURL: videoURL, gifURL: nil, livePhotoImageURL: nil, livePhotoVideoURL: nil)
+            }
+            guard let livePhotoIdentifier else {
+                throw err("Live Photo identifier missing")
+            }
+            let stillURL = directory.appendingPathComponent("OpenReshot.jpg")
+            let stillFrame = try motionExportFrame(renderer: renderer, plan: plan, frameIndex: plan.frameCount - 1)
+            try Self.writeLivePhotoStillJPEG(stillFrame, assetIdentifier: livePhotoIdentifier, to: stillURL)
+            return MotionExportPackage(format: .livePhoto, videoURL: nil, gifURL: nil, livePhotoImageURL: stillURL, livePhotoVideoURL: videoURL)
+        }
+    }
+
+    @MainActor
+    private func motionExportFrame(renderer: ReshootRenderer, plan: MotionFramePlan, frameIndex: Int) throws -> UIImage {
+        let frame = try renderer.renderMotionFrame(tilt: plan.tilt(at: frameIndex), size: plan.size)
+        return Self.watermarkedExportFrame(frame)
+    }
+
+    private func motionFramePlan() -> MotionFramePlan {
+        MotionFramePlan(
+            size: Self.motionExportSize(for: imageAspect),
+            fps: Self.motionExportFPS,
+            frameCount: Self.motionExportFrameCount,
+            tiltRange: viewAngleMode.exportTiltRange
+        )
+    }
+
+    private static func motionExportSize(for aspect: CGFloat) -> CGSize {
+        let safeAspect = max(aspect, 0.1)
+        let longSide = motionExportMaxLongSide
+        let rawWidth: CGFloat
+        let rawHeight: CGFloat
+        if safeAspect >= 1 {
+            rawWidth = longSide
+            rawHeight = longSide / safeAspect
+        } else {
+            rawHeight = longSide
+            rawWidth = longSide * safeAspect
+        }
+        return CGSize(width: evenDimension(rawWidth), height: evenDimension(rawHeight))
+    }
+
+    private static func evenDimension(_ value: CGFloat) -> CGFloat {
+        max(2, CGFloat(Int(value.rounded(.toNearestOrAwayFromZero)) / 2 * 2))
+    }
+
+    private static func watermarkedExportFrame(_ image: UIImage) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let size = image.size
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+
+            let label = "OpenReshot"
+            let fontSize = max(11, min(size.width, size.height) * 0.026)
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: fontSize, weight: .semibold),
+                .foregroundColor: UIColor.white.withAlphaComponent(0.86)
+            ]
+            let labelSize = (label as NSString).size(withAttributes: attributes)
+            let horizontalPadding = fontSize * 0.72
+            let verticalPadding = fontSize * 0.40
+            let badgeSize = CGSize(
+                width: labelSize.width + horizontalPadding * 2,
+                height: labelSize.height + verticalPadding * 2
+            )
+            let inset = max(12, min(size.width, size.height) * 0.025)
+            let badgeRect = CGRect(
+                x: size.width - badgeSize.width - inset,
+                y: size.height - badgeSize.height - inset,
+                width: badgeSize.width,
+                height: badgeSize.height
+            )
+            UIColor.black.withAlphaComponent(0.32).setFill()
+            UIBezierPath(roundedRect: badgeRect, cornerRadius: badgeRect.height / 2).fill()
+            (label as NSString).draw(
+                in: CGRect(
+                    x: badgeRect.minX + horizontalPadding,
+                    y: badgeRect.minY + verticalPadding,
+                    width: labelSize.width,
+                    height: labelSize.height
+                ),
+                withAttributes: attributes
+            )
+        }
+    }
+
+    private static func writeLivePhotoStillJPEG(_ image: UIImage, assetIdentifier: String, to url: URL) throws {
+        try? FileManager.default.removeItem(at: url)
+        guard let cgImage = image.cgImage,
+              let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.jpeg.identifier as CFString, 1, nil) else {
+            throw err("Live Photo still image encode failed")
+        }
+        let metadata: [CFString: Any] = [
+            kCGImagePropertyMakerAppleDictionary: [
+                "17": assetIdentifier
+            ]
+        ]
+        CGImageDestinationAddImage(destination, cgImage, metadata as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else {
+            throw err("Live Photo still image finalize failed")
+        }
+    }
+
+    private static func saveMotionExportPackage(_ package: MotionExportPackage) async throws {
+        switch package.format {
+        case .mp4:
+            guard let url = package.videoURL else { throw err("MP4 export missing") }
+            try await saveVideoToPhotoLibrary(url)
+        case .gif:
+            guard let url = package.gifURL else { throw err("GIF export missing") }
+            try await saveImageFileToPhotoLibrary(url)
+        case .livePhoto:
+            guard let imageURL = package.livePhotoImageURL,
+                  let videoURL = package.livePhotoVideoURL else {
+                throw err("Live Photo export missing")
+            }
+            try await saveLivePhotoToPhotoLibrary(imageURL: imageURL, videoURL: videoURL)
+        }
+    }
+
+    private static func validateLivePhotoPackage(_ package: MotionExportPackage) async throws {
+        guard let imageURL = package.livePhotoImageURL,
+              let videoURL = package.livePhotoVideoURL else {
+            throw err("Live Photo export missing")
+        }
+        _ = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<PHLivePhoto, Error>) in
+            var completed = false
+            var requestID = PHLivePhotoRequestIDInvalid
+            requestID = PHLivePhoto.request(
+                withResourceFileURLs: [imageURL, videoURL],
+                placeholderImage: nil,
+                targetSize: CGSize(width: 320, height: 320),
+                contentMode: .aspectFit
+            ) { livePhoto, info in
+                if completed { return }
+                let cancelled = (info[PHLivePhotoInfoCancelledKey] as? NSNumber)?.boolValue ?? false
+                if cancelled {
+                    completed = true
+                    continuation.resume(throwing: err("Live Photo validation cancelled"))
+                    return
+                }
+                if let error = info[PHLivePhotoInfoErrorKey] as? Error {
+                    completed = true
+                    continuation.resume(throwing: error)
+                    return
+                }
+                let degraded = (info[PHLivePhotoInfoIsDegradedKey] as? NSNumber)?.boolValue ?? false
+                if let livePhoto, !degraded {
+                    completed = true
+                    continuation.resume(returning: livePhoto)
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+                guard !completed else { return }
+                completed = true
+                if requestID != PHLivePhotoRequestIDInvalid {
+                    PHLivePhoto.cancelRequest(withRequestID: requestID)
+                }
+                continuation.resume(throwing: err("Live Photo validation timed out"))
+            }
+        }
+    }
+
+    private static func ensurePhotoLibraryAddAuthorization() async throws {
+        let currentStatus = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+        let status: PHAuthorizationStatus
+        if currentStatus == .notDetermined {
+            status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+        } else {
+            status = currentStatus
+        }
+        guard status == .authorized || status == .limited else {
+            throw err("Photo library add permission denied")
+        }
+    }
+
+    private static func saveVideoToPhotoLibrary(_ url: URL) async throws {
+        try await ensurePhotoLibraryAddAuthorization()
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
+            } completionHandler: { success, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if success {
+                    continuation.resume()
+                } else {
+                    continuation.resume(throwing: err("Photo library video save failed"))
+                }
+            }
+        }
+    }
+
+    private static func saveImageFileToPhotoLibrary(_ url: URL) async throws {
+        try await ensurePhotoLibraryAddAuthorization()
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: url)
+            } completionHandler: { success, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if success {
+                    continuation.resume()
+                } else {
+                    continuation.resume(throwing: err("Photo library image save failed"))
+                }
+            }
+        }
+    }
+
+    private static func saveLivePhotoToPhotoLibrary(imageURL: URL, videoURL: URL) async throws {
+        try await ensurePhotoLibraryAddAuthorization()
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            PHPhotoLibrary.shared().performChanges {
+                let request = PHAssetCreationRequest.forAsset()
+                let photoOptions = PHAssetResourceCreationOptions()
+                photoOptions.uniformTypeIdentifier = UTType.jpeg.identifier
+                let videoOptions = PHAssetResourceCreationOptions()
+                videoOptions.uniformTypeIdentifier = UTType.quickTimeMovie.identifier
+                request.addResource(with: .photo, fileURL: imageURL, options: photoOptions)
+                request.addResource(with: .pairedVideo, fileURL: videoURL, options: videoOptions)
+            } completionHandler: { success, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if success {
+                    continuation.resume()
+                } else {
+                    continuation.resume(throwing: err("Photo library Live Photo save failed"))
                 }
             }
         }
@@ -1559,6 +2021,8 @@ struct ContentView: View {
     @State private var generationStartedAt = Date()
     @State private var resultFlash = false
     @State private var saveToastVisible = false
+    @State private var saveToastMessage = "已保存到相册"
+    @State private var saveToastSystemImage = "checkmark"
     @State private var dragBaseTilt = SIMD2<Float>(0, 0)
     @State private var draggingStage = false
     @State private var showDragHint = false
@@ -1677,6 +2141,33 @@ struct ContentView: View {
         }
         .onChange(of: app.saveState) { _, state in
             if state == .saved {
+                saveToastMessage = "已保存到相册"
+                saveToastSystemImage = "checkmark"
+                withAnimation(.easeOut(duration: 0.20)) {
+                    saveToastVisible = true
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    withAnimation(.easeInOut(duration: 0.28)) {
+                        saveToastVisible = false
+                    }
+                }
+            }
+        }
+        .onChange(of: app.motionExportState) { _, state in
+            if state == .saved {
+                saveToastMessage = app.motionExportFormat?.savedMessage ?? "已保存到相册"
+                saveToastSystemImage = "checkmark"
+                withAnimation(.easeOut(duration: 0.20)) {
+                    saveToastVisible = true
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    withAnimation(.easeInOut(duration: 0.28)) {
+                        saveToastVisible = false
+                    }
+                }
+            } else if state == .failed {
+                saveToastMessage = app.motionExportFailureMessage ?? "导出失败"
+                saveToastSystemImage = "exclamationmark.triangle"
                 withAnimation(.easeOut(duration: 0.20)) {
                     saveToastVisible = true
                 }
@@ -2010,12 +2501,9 @@ struct ContentView: View {
         let aspect = max(Float(app.imageAspect), 0.1)
         let wideAmount = Self.clamp((aspect - 1.15) / 0.85, 0, 1)
         let tallAmount = Self.clamp((1.0 / aspect - 1.0) / 1.0, 0, 1)
-        let xLimit: Float = 0.72 - 0.32 * wideAmount + 0.10 * tallAmount
-        let yLimit: Float = 0.56 - 0.18 * wideAmount + 0.06 * tallAmount
-        return SIMD2(
-            Self.clamp(xLimit, 0.36, 0.82),
-            Self.clamp(yLimit, 0.36, 0.62)
-        )
+        let baseLimit = Self.clamp(0.72 - 0.24 * wideAmount + 0.10 * tallAmount, 0.42, 0.82)
+        let limit = Self.clamp(baseLimit * app.viewAngleMode.motionScale, 0.12, 0.82)
+        return SIMD2(limit, limit)
     }
 
     @ViewBuilder
@@ -2437,6 +2925,17 @@ struct ContentView: View {
         app.resetLensControlsToDefault()
     }
 
+    private func setLensViewAngleMode(_ mode: ReshotViewAngleMode) {
+        app.setViewAngleMode(mode)
+        let limit = photoTiltLimit
+        let tilt = SIMD2(
+            Self.clamp(app.motionTilt.x, -limit.x, limit.x),
+            Self.clamp(app.motionTilt.y, -limit.y, limit.y)
+        )
+        app.renderer?.setTiltTarget(tilt)
+        app.updateSheen(for: tilt)
+    }
+
     private func playDollyZoom() {
         guard !dollyZoomRunning else { return }
         cancelDollyZoom(reset: false)
@@ -2498,7 +2997,7 @@ struct ContentView: View {
 
                 Spacer(minLength: 8 * scale)
 
-                Text("\(lensFocusLabel) · \(lensFNumberLabel)")
+                Text("\(app.viewAngleMode.title) · \(lensFocusLabel) · \(lensFNumberLabel)")
                     .font(.system(size: 10 * scale, weight: .semibold, design: .rounded))
                     .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.58))
                     .lineLimit(1)
@@ -2530,6 +3029,10 @@ struct ContentView: View {
                 .buttonStyle(FluidPressButtonStyle(pressedScale: 0.90))
                 .accessibilityLabel("复位镜头")
             }
+
+            lensAngleModeControl(scale: scale)
+
+            lensMotionExportControl(scale: scale)
 
             lensValueSlider(
                 systemImage: "scope",
@@ -2583,6 +3086,115 @@ struct ContentView: View {
                 .strokeBorder(OpenReshotPalette.twilightText.opacity(0.13), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.30), radius: 16, y: 8)
+    }
+
+    private func lensAngleModeControl(scale: CGFloat) -> some View {
+        HStack(spacing: 8 * scale) {
+            Image(systemName: "viewfinder")
+                .font(.system(size: 10.5 * scale, weight: .semibold))
+                .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.54))
+                .frame(width: 15 * scale)
+
+            Text("视角")
+                .font(.system(size: 9 * scale, weight: .semibold, design: .rounded))
+                .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.47))
+                .frame(width: 30 * scale, alignment: .leading)
+
+            HStack(spacing: 4 * scale) {
+                ForEach(ReshotViewAngleMode.allCases) { mode in
+                    let selected = app.viewAngleMode == mode
+                    Button {
+                        setLensViewAngleMode(mode)
+                    } label: {
+                        Text(mode.title)
+                            .font(.system(size: 9 * scale, weight: .bold, design: .rounded))
+                            .foregroundStyle(selected ? OpenReshotPalette.twilightButtonText : OpenReshotPalette.twilightText.opacity(0.58))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.82)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 23 * scale)
+                            .background(
+                                selected
+                                ? OpenReshotPalette.twilightAccent.opacity(0.92)
+                                : OpenReshotPalette.twilightText.opacity(0.07),
+                                in: Capsule()
+                            )
+                    }
+                    .buttonStyle(FluidPressButtonStyle(pressedScale: 0.96))
+                    .accessibilityLabel("切换到\(mode.title)视角")
+                }
+            }
+        }
+        .frame(height: 25 * scale)
+    }
+
+    private func lensMotionExportControl(scale: CGFloat) -> some View {
+        HStack(spacing: 8 * scale) {
+            Image(systemName: "square.and.arrow.up")
+                .font(.system(size: 10.5 * scale, weight: .semibold))
+                .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.54))
+                .frame(width: 15 * scale)
+
+            Text("导出")
+                .font(.system(size: 9 * scale, weight: .semibold, design: .rounded))
+                .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.47))
+                .frame(width: 30 * scale, alignment: .leading)
+
+            HStack(spacing: 4 * scale) {
+                ForEach(MotionExportFormat.allCases) { format in
+                    let enabled = motionExportEnabled(format)
+                    Button {
+                        app.exportMotion(format)
+                    } label: {
+                        HStack(spacing: 3 * scale) {
+                            Image(systemName: motionExportIcon(for: format))
+                                .font(.system(size: 8.5 * scale, weight: .semibold))
+
+                            Text(motionExportTitle(for: format))
+                                .font(.system(size: 8.5 * scale, weight: .bold, design: .rounded))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.78)
+                        }
+                        .foregroundStyle(enabled ? OpenReshotPalette.twilightText.opacity(0.72) : OpenReshotPalette.twilightText.opacity(0.26))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 23 * scale)
+                        .background(OpenReshotPalette.twilightText.opacity(enabled ? 0.075 : 0.035), in: Capsule())
+                    }
+                    .disabled(!enabled)
+                    .buttonStyle(FluidPressButtonStyle(pressedScale: 0.96))
+                    .accessibilityLabel("导出\(format.title)")
+                }
+            }
+        }
+        .frame(height: 25 * scale)
+    }
+
+    private func motionExportEnabled(_ format: MotionExportFormat) -> Bool {
+        guard app.motionExportState != .rendering, app.rendererReady, app.resultImage == nil else { return false }
+        if format == .livePhoto {
+            return app.viewAngleMode == .standard
+        }
+        return true
+    }
+
+    private func motionExportIcon(for format: MotionExportFormat) -> String {
+        if app.motionExportState == .rendering, app.motionExportFormat == format {
+            return "hourglass"
+        }
+        if app.motionExportState == .saved, app.motionExportFormat == format {
+            return "checkmark"
+        }
+        return format.systemImage
+    }
+
+    private func motionExportTitle(for format: MotionExportFormat) -> String {
+        if app.motionExportState == .rendering, app.motionExportFormat == format {
+            return "\(Int(app.motionExportProgress * 100))%"
+        }
+        if app.motionExportState == .failed, app.motionExportFormat == format {
+            return "重试"
+        }
+        return format.title
     }
 
     private func lensValueSlider(
@@ -2963,10 +3575,10 @@ struct ContentView: View {
 
     private func saveToast(size: CGSize, scale: CGFloat) -> some View {
         HStack(spacing: 7 * scale) {
-            Image(systemName: "checkmark")
+            Image(systemName: saveToastSystemImage)
                 .font(.system(size: 12 * scale, weight: .bold))
 
-            Text("已保存到相册")
+            Text(saveToastMessage)
                 .font(.system(size: 12 * scale, weight: .semibold, design: .rounded))
         }
         .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.88))
@@ -3051,8 +3663,8 @@ struct ContentView: View {
                     }
                     let limit = photoTiltLimit
                     let tilt = SIMD2(
-                        Self.clamp(dragBaseTilt.x + Float(value.translation.width / 140), -limit.x, limit.x),
-                        Self.clamp(dragBaseTilt.y + Float(value.translation.height / 140), -limit.y, limit.y)
+                        Self.clamp(dragBaseTilt.x + Float(value.translation.width / 128), -limit.x, limit.x),
+                        Self.clamp(dragBaseTilt.y + Float(value.translation.height / 128), -limit.y, limit.y)
                     )
                     app.renderer?.setTiltTarget(tilt)
                     app.updateSheen(for: tilt)
