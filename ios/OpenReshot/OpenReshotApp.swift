@@ -3053,15 +3053,12 @@ struct ContentView: View {
     private func lensDock(width: CGFloat, scale: CGFloat) -> some View {
         VStack(spacing: 7 * scale) {
             HStack(spacing: 7 * scale) {
-                dockGlyph(systemName: "camera.aperture", scale: scale)
-
-                Spacer(minLength: 8 * scale)
-
                 Text("\(app.viewAngleMode.title) · \(lensFocusLabel) · \(lensFNumberLabel)")
                     .font(.system(size: 10 * scale, weight: .semibold, design: .rounded))
                     .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.70))
                     .lineLimit(1)
                     .minimumScaleFactor(0.78)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                 Button {
                     playDollyZoom()
@@ -3255,18 +3252,6 @@ struct ContentView: View {
             return "重试"
         }
         return format.title
-    }
-
-    private func dockGlyph(systemName: String, scale: CGFloat) -> some View {
-        Image(systemName: systemName)
-            .font(.system(size: 12 * scale, weight: .semibold))
-            .foregroundStyle(OpenReshotPalette.twilightAccent.opacity(0.92))
-            .frame(width: 24 * scale, height: 24 * scale)
-            .background(OpenReshotPalette.twilightText.opacity(0.09), in: Circle())
-            .overlay(
-                Circle()
-                    .strokeBorder(OpenReshotPalette.twilightText.opacity(0.08), lineWidth: 0.8)
-            )
     }
 
     private func dockIconButton(systemName: String, highlighted: Bool = false, scale: CGFloat) -> some View {
@@ -4171,19 +4156,19 @@ private struct OpenReshotGlassPanelModifier: ViewModifier {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         if #available(iOS 26.0, *) {
             content
-                .glassEffect(.regular.tint(OpenReshotPalette.twilightText.opacity(0.045)).interactive(), in: shape)
+                .glassEffect(.regular.interactive(), in: shape)
                 .overlay(
-                    shape.strokeBorder(OpenReshotPalette.twilightText.opacity(0.18), lineWidth: 0.8)
+                    shape.strokeBorder(OpenReshotPalette.twilightText.opacity(0.11), lineWidth: 0.8)
                 )
-                .shadow(color: .black.opacity(0.24), radius: 22, y: 10)
+                .shadow(color: .black.opacity(0.20), radius: 22, y: 10)
         } else {
             content
                 .background(.ultraThinMaterial, in: shape)
-                .background(OpenReshotPalette.twilightInk.opacity(0.18), in: shape)
+                .background(OpenReshotPalette.twilightInk.opacity(0.08), in: shape)
                 .overlay(
-                    shape.strokeBorder(OpenReshotPalette.twilightText.opacity(0.14), lineWidth: 0.8)
+                    shape.strokeBorder(OpenReshotPalette.twilightText.opacity(0.09), lineWidth: 0.8)
                 )
-                .shadow(color: .black.opacity(0.26), radius: 20, y: 9)
+                .shadow(color: .black.opacity(0.22), radius: 20, y: 9)
         }
     }
 }
