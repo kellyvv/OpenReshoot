@@ -1303,7 +1303,7 @@ final class AppState: ObservableObject {
             return MotionExportPackage(format: .gif, videoURL: nil, gifURL: gifURL, livePhotoImageURL: nil, livePhotoVideoURL: nil)
 
         case .mp4, .livePhoto:
-            let livePhotoIdentifier = format == .livePhoto ? "OpenReshot.\(UUID().uuidString)" : nil
+            let livePhotoIdentifier = format == .livePhoto ? Self.makeLivePhotoAssetIdentifier() : nil
             let videoURL = directory.appendingPathComponent(format == .livePhoto ? "OpenReshot.mov" : "OpenReshot.mp4")
             let writer = try MotionVideoWriter(
                 url: videoURL,
@@ -1413,8 +1413,15 @@ final class AppState: ObservableObject {
         }
     }
 
+    private static func makeLivePhotoAssetIdentifier() -> String {
+        UUID().uuidString
+    }
+
     private static func writeLivePhotoStillJPEG(_ image: UIImage, assetIdentifier: String, to url: URL) throws {
         try? FileManager.default.removeItem(at: url)
+        guard assetIdentifier.count == 36 else {
+            throw err("Live Photo asset identifier must be a 36-character UUID")
+        }
         guard let cgImage = image.cgImage,
               let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.jpeg.identifier as CFString, 1, nil) else {
             throw err("Live Photo still image encode failed")
