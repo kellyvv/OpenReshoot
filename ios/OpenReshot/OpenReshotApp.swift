@@ -424,6 +424,8 @@ final class AppState: ObservableObject {
     private static let geminiInputMaxSide: CGFloat = 1024
     private static let motionExportFPS = 24
     private static let motionExportFrameCount = 64
+    private static let livePhotoExportFrameCount = 96
+    private static let livePhotoStillFrameIndex = 0
     private static let motionExportMaxLongSide: CGFloat = 960
     private static let geminiModel = "gemini-3.1-flash-image"
     private static let demoSceneResource = "DemoFLOW"
@@ -1281,7 +1283,7 @@ final class AppState: ObservableObject {
 
     @MainActor
     private func renderMotionExportPackage(format: MotionExportFormat, renderer: ReshootRenderer) async throws -> MotionExportPackage {
-        let plan = motionFramePlan()
+        let plan = motionFramePlan(for: format)
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("OpenReshotMotion-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -1311,7 +1313,7 @@ final class AppState: ObservableObject {
                 size: plan.size,
                 fps: plan.fps,
                 contentIdentifier: livePhotoIdentifier,
-                stillImageFrameIndex: format == .livePhoto ? plan.frameCount - 1 : nil
+                stillImageFrameIndex: format == .livePhoto ? Self.livePhotoStillFrameIndex : nil
             )
             for frameIndex in 0..<plan.frameCount {
                 try Task.checkCancellation()
@@ -1331,7 +1333,7 @@ final class AppState: ObservableObject {
                 throw err("Live Photo identifier missing")
             }
             let stillURL = directory.appendingPathComponent("OpenReshot.jpg")
-            let stillFrame = try motionExportFrame(renderer: renderer, plan: plan, frameIndex: plan.frameCount - 1)
+            let stillFrame = try motionExportFrame(renderer: renderer, plan: plan, frameIndex: Self.livePhotoStillFrameIndex)
             try Self.writeLivePhotoStillJPEG(stillFrame, assetIdentifier: livePhotoIdentifier, to: stillURL)
             return MotionExportPackage(format: .livePhoto, videoURL: nil, gifURL: nil, livePhotoImageURL: stillURL, livePhotoVideoURL: videoURL)
         }
@@ -1343,12 +1345,13 @@ final class AppState: ObservableObject {
         return Self.watermarkedExportFrame(frame)
     }
 
-    private func motionFramePlan() -> MotionFramePlan {
+    private func motionFramePlan(for format: MotionExportFormat) -> MotionFramePlan {
         MotionFramePlan(
             size: Self.motionExportSize(for: imageAspect),
             fps: Self.motionExportFPS,
-            frameCount: Self.motionExportFrameCount,
-            tiltRange: viewAngleMode.exportTiltRange
+            frameCount: format == .livePhoto ? Self.livePhotoExportFrameCount : Self.motionExportFrameCount,
+            tiltRange: viewAngleMode.exportTiltRange,
+            path: format == .livePhoto ? .centerOrbit(clockwise: true) : .shuttle
         )
     }
 
