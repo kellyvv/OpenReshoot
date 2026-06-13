@@ -30,7 +30,13 @@ open OpenReshot.xcodeproj
 
 ## 模型下载
 
-内置下载地址在 `OpenReshotModelDownloadBaseURL`：
+内置主下载地址在 `OpenReshotModelDownloadBaseURL`：
+
+```text
+https://modelscope.cn/models/kilywei/openreshoot-sharp-coreml/resolve/main/SHARP.mlpackage
+```
+
+备用下载地址在 `OpenReshotModelDownloadMirrorBaseURLs`：
 
 ```text
 https://huggingface.co/kellyxiaowei/openreshoot-sharp-coreml/resolve/main/SHARP.mlpackage
@@ -39,10 +45,14 @@ https://huggingface.co/kellyxiaowei/openreshoot-sharp-coreml/resolve/main/SHARP.
 公开模型仓库：
 
 ```text
+ModelScope:
+https://modelscope.cn/models/kilywei/openreshoot-sharp-coreml
+
+Hugging Face:
 https://huggingface.co/kellyxiaowei/openreshoot-sharp-coreml
 ```
 
-App 不下载 zip，而是直接下载 Hugging Face 上可见的 `.mlpackage` 源文件：
+App 不下载 zip，而是直接下载 ModelScope / Hugging Face 上可见的 `.mlpackage` 源文件：
 
 ```text
 SHARP.mlpackage/

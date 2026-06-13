@@ -30,9 +30,16 @@ OpenReshot 是一个原生 iOS 照片动效应用。选择一张照片后，你�
 
 WWDC 2026 之后，空间照片和可变视角照片成为 iOS 27 时代很有吸引力的新体验。但很多用户会因为系统版本或设备限制暂时用不上。OpenReshot 想做的就是把这种“普通照片也能换角度看、换角度拍”的体验，带给更多 iPhone 和 iPad。
 
-<div align="center">
-  <video src="https://github.com/user-attachments/assets/57ccefa4-ae91-4185-ba59-5f2f672e9c61" width="760" controls muted playsinline></video>
-</div>
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <video src="https://github.com/user-attachments/assets/57ccefa4-ae91-4185-ba59-5f2f672e9c61" width="360" controls muted playsinline></video>
+    </td>
+    <td width="50%" align="center">
+      <video src="https://github.com/user-attachments/assets/d785d845-1fd7-4bb6-978e-c9d87ec1572f" width="360" controls muted playsinline></video>
+    </td>
+  </tr>
+</table>
 
 ## 核心体验
 
@@ -61,10 +68,10 @@ WWDC 2026 之后，空间照片和可变视角照片成为 iOS 27 时代很有�
 ### 2026-06-11
 
 - iOS 主流程已完成：选图、照片动效、当前角度重构、结果保存。
-- iOS 默认打包为空壳 App，不内置 1GB+ 模型；首次使用可在设置里从 Hugging Face 下载 Core ML 模型。
+- iOS 默认打包为空壳 App，不内置 1GB+ 模型；首次使用可在设置里从 ModelScope 下载 Core ML 模型，Hugging Face 作为备用镜像。
 - 查看器动效已补齐 glow、sheen、cover fade 和多彩缺失区域处理。
 - 底部操作区改成更克制的 PhoneClaw 同系风格，按钮直接融合在背景里。
-- 模型仓库已发布到 [Hugging Face](https://huggingface.co/kellyxiaowei/openreshoot-sharp-coreml)，可直接查看 `SHARP.mlpackage` 源文件。
+- 模型仓库已发布到 [ModelScope](https://modelscope.cn/models/kilywei/openreshoot-sharp-coreml) 和 [Hugging Face](https://huggingface.co/kellyxiaowei/openreshoot-sharp-coreml)，可直接查看 `SHARP.mlpackage` 源文件。
 
 </details>
 
@@ -94,9 +101,23 @@ iOS 细节见 [ios/README.md](ios/README.md)。
 
 首次运行后，点首页右上角设置按钮，进入 **设置 → 模型 → 下载模型**。
 
-App 会从 Hugging Face 下载并在本机重建 Core ML package：
+App 默认从 ModelScope 下载并在本机重建 Core ML package；如果主源失败，会尝试 Hugging Face 备用镜像：
 
 ```text
+ModelScope 下载源:
+https://modelscope.cn/models/kilywei/openreshoot-sharp-coreml/resolve/main/SHARP.mlpackage
+
+Hugging Face 备用源:
+https://huggingface.co/kellyxiaowei/openreshoot-sharp-coreml/resolve/main/SHARP.mlpackage
+```
+
+公开模型仓库：
+
+```text
+ModelScope:
+https://modelscope.cn/models/kilywei/openreshoot-sharp-coreml
+
+Hugging Face:
 https://huggingface.co/kellyxiaowei/openreshoot-sharp-coreml
 ```
 
