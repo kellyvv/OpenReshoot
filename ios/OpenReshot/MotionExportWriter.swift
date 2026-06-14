@@ -16,7 +16,6 @@ struct MotionExportPackage {
 struct MotionFramePlan {
     enum Path {
         case centerOrbit(clockwise: Bool)
-        case centeredOrbit(clockwise: Bool, stillFrameIndex: Int)
     }
 
     let size: CGSize
@@ -33,8 +32,6 @@ struct MotionFramePlan {
         switch path {
         case .centerOrbit(let clockwise):
             return centerOrbitTilt(at: index, clockwise: clockwise)
-        case .centeredOrbit(let clockwise, let stillFrameIndex):
-            return centeredOrbitTilt(at: index, clockwise: clockwise, stillFrameIndex: stillFrameIndex)
         }
     }
 
@@ -45,17 +42,6 @@ struct MotionFramePlan {
         let radius = tiltRange * easeOut(ramp)
         let direction: Float = clockwise ? -1 : 1
         let angle = (-.pi / 2) + direction * progress * .pi * 2 * 0.86
-        return SIMD2(cos(angle) * radius, sin(angle) * radius)
-    }
-
-    private func centeredOrbitTilt(at index: Int, clockwise: Bool, stillFrameIndex: Int) -> SIMD2<Float> {
-        let clampedStillFrame = min(max(stillFrameIndex, 0), max(frameCount - 1, 0))
-        guard index != clampedStillFrame else { return .zero }
-        let span = index < clampedStillFrame ? max(clampedStillFrame, 1) : max(frameCount - 1 - clampedStillFrame, 1)
-        let signedProgress = Float(index - clampedStillFrame) / Float(span)
-        let radius = tiltRange * easeOut(abs(signedProgress))
-        let direction: Float = clockwise ? -1 : 1
-        let angle = (-.pi / 2) + direction * signedProgress * .pi * 0.72
         return SIMD2(cos(angle) * radius, sin(angle) * radius)
     }
 

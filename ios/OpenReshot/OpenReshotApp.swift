@@ -439,8 +439,7 @@ final class AppState: ObservableObject {
     private static let livePhotoStillFrameIndex = 0
     private static let momentsLivePhotoFPS = 30
     private static let momentsLivePhotoFrameCount = 90
-    private static let momentsLivePhotoStillFrameIndex = 45
-    private static let momentsLivePhotoTiltRange: Float = 0.24
+    private static let momentsLivePhotoStillFrameIndex = 0
     private static let motionExportMaxLongSide: CGFloat = 1920
     private static let geminiModel = "gemini-3.1-flash-image"
     private static let demoSceneResource = "DemoFLOW"
@@ -1357,8 +1356,8 @@ final class AppState: ObservableObject {
                 size: Self.motionExportSize(for: imageAspect),
                 fps: Self.momentsLivePhotoFPS,
                 frameCount: Self.momentsLivePhotoFrameCount,
-                tiltRange: Self.momentsLivePhotoTiltRange,
-                path: .centeredOrbit(clockwise: true, stillFrameIndex: Self.momentsLivePhotoStillFrameIndex)
+                tiltRange: Self.motionExportTiltRange,
+                path: .centerOrbit(clockwise: true)
             )
         }
         return MotionFramePlan(
