@@ -19,7 +19,7 @@
 	<key>CFBundleShortVersionString</key>
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
-	<string>4</string>
+	<string>5</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Save reconstructed photos, motion videos, GIFs, and Live Photos to your library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
