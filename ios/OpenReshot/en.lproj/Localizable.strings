@@ -9,8 +9,8 @@
 "%@ 导出失败" = "%@ export failed";
 "%@ 校验失败：期望 %@，实际 %@" = "%@ validation failed: expected %@, got %@";
 "%@ · %@ 点" = "%@ · %@ points";
-"%@ 视角" = "%@ view";
-"%d 个空间" = "%d spaces";
+"%ld 个空间" = "%ld spaces";
+"切换到%@视角" = "Switch to %@ view";
 "下载" = "Download";
 "下载中" = "Downloading";
 "下载失败" = "Download failed";
@@ -81,7 +81,7 @@
 "模型" = "Model";
 "模型下载 URL 无效" = "Invalid model download URL";
 "模型下载 URL 无效：%@" = "Invalid model download URL: %@";
-"模型下载失败，HTTP %d" = "Model download failed, HTTP %d";
+"模型下载失败，HTTP %ld" = "Model download failed, HTTP %ld";
 "模型状态需要处理" = "Model needs attention";
 "正在" = "Downloading";
 "正在从 %@ 下载" = "Downloading from %@";

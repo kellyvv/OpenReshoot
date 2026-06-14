@@ -624,7 +624,7 @@ extension DownloadFailure: LocalizedError {
         case .invalidResponse(let message):
             return "下载源响应无效：%@".localizedFormat(message)
         case .httpStatus(let code):
-            return "模型下载失败，HTTP %d".localizedFormat(code)
+            return "模型下载失败，HTTP %ld".localizedFormat(code)
         case .validatorMismatch(let expected, let actual, let field):
             return "%@ 校验失败：期望 %@，实际 %@".localizedFormat(field, expected, actual)
         case .insufficientDiskSpace(let required, let available):

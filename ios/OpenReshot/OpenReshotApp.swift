@@ -24,6 +24,10 @@ extension String {
     }
 }
 
+private func localizedSpaceCount(_ count: Int) -> String {
+    String.localizedStringWithFormat(NSLocalizedString("%ld 个空间", comment: ""), count)
+}
+
 @main
 struct OpenReshotApp: App {
     var body: some Scene {
@@ -3231,7 +3235,7 @@ struct ContentView: View {
                 )
         }
         .buttonStyle(FluidPressButtonStyle(pressedScale: 0.96))
-        .accessibilityLabel("%@ 视角".localizedFormat(mode.title))
+        .accessibilityLabel("切换到%@视角".localizedFormat(mode.title))
     }
 
     private func motionExportDock(width: CGFloat, scale: CGFloat) -> some View {
@@ -3707,7 +3711,7 @@ struct ContentView: View {
             Image(systemName: saveToastSystemImage)
                 .font(.system(size: 12 * scale, weight: .bold))
 
-            Text(saveToastMessage.localized)
+            Text(saveToastMessage)
                 .font(.system(size: 12 * scale, weight: .semibold, design: .rounded))
         }
         .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.88))
@@ -4333,7 +4337,7 @@ private struct ReshotGalleryView: View {
                     .font(.system(size: 18, weight: .semibold, design: .rounded))
                     .foregroundStyle(SettingsSheetStyle.primaryText)
 
-                Text("%d 个空间".localizedFormat(app.galleryItems.count))
+                Text(localizedSpaceCount(app.galleryItems.count))
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundStyle(SettingsSheetStyle.tertiaryText)
             }
