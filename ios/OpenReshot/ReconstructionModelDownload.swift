@@ -31,7 +31,7 @@ private enum ReconstructionModelDownloadError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidURL:
-            return "模型下载 URL 无效"
+            return "模型下载 URL 无效".localized
         case .invalidResponse(let message):
             return message
         }
@@ -61,17 +61,17 @@ final class ReconstructionModelStore: ObservableObject {
     var activeModelLabel: String {
         switch installState {
         case .downloaded:
-            return "已下载"
+            return "已下载".localized
         case .bundled:
-            return "内置"
+            return "内置".localized
         case .downloading:
-            return "下载中"
+            return "下载中".localized
         case .checkingSource:
-            return "连接中"
+            return "连接中".localized
         case .failed:
-            return hasDownloadedModel ? "已下载" : (Self.bundledModelURL == nil ? "下载" : "内置")
+            return hasDownloadedModel ? "已下载".localized : (Self.bundledModelURL == nil ? "下载".localized : "内置".localized)
         case .notInstalled:
-            return "下载"
+            return "下载".localized
         }
     }
 
@@ -85,8 +85,8 @@ final class ReconstructionModelStore: ObservableObject {
 
     var primaryDownloadSourceLabel: String {
         Self.builtInDownloadBaseURL.map {
-            Self.sourceLabel(for: $0, fallback: "下载源")
-        } ?? "下载源"
+            Self.sourceLabel(for: $0, fallback: "下载源".localized)
+        } ?? "下载源".localized
     }
 
     nonisolated func activeModelURL() -> URL? {
@@ -321,7 +321,7 @@ final class ReconstructionModelStore: ObservableObject {
         let packageDirectory = stagingDirectory.appendingPathComponent("SHARP.mlpackage", isDirectory: true)
         return DownloadAsset(
             id: assetID,
-            displayName: "空间模型",
+            displayName: "空间模型".localized,
             destinationDirectory: packageDirectory,
             files: try packageFileSpecs.map { spec in
                 DownloadFile(
@@ -620,23 +620,23 @@ extension DownloadFailure: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidURL(let value):
-            return "模型下载 URL 无效：\(value)"
+            return "模型下载 URL 无效：%@".localizedFormat(value)
         case .invalidResponse(let message):
-            return "下载源响应无效：\(message)"
+            return "下载源响应无效：%@".localizedFormat(message)
         case .httpStatus(let code):
-            return "模型下载失败，HTTP \(code)"
+            return "模型下载失败，HTTP %d".localizedFormat(code)
         case .validatorMismatch(let expected, let actual, let field):
-            return "\(field) 校验失败：期望 \(expected)，实际 \(actual)"
+            return "%@ 校验失败：期望 %@，实际 %@".localizedFormat(field, expected, actual)
         case .insufficientDiskSpace(let required, let available):
             let formatter = ByteCountFormatter()
             formatter.countStyle = .file
-            return "可用空间不足，需要 \(formatter.string(fromByteCount: required))，当前约 \(formatter.string(fromByteCount: available))"
+            return "可用空间不足，需要 %@，当前约 %@".localizedFormat(formatter.string(fromByteCount: required), formatter.string(fromByteCount: available))
         case .manifestCorrupt:
-            return "下载记录损坏，已准备重新下载"
+            return "下载记录损坏，已准备重新下载".localized
         case .fileSystem(let message):
-            return "文件写入失败：\(message)"
+            return "文件写入失败：%@".localizedFormat(message)
         case .cancelled:
-            return "下载已取消"
+            return "下载已取消".localized
         }
     }
 }

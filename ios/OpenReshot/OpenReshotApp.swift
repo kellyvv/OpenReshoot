@@ -14,6 +14,16 @@ import simd
 import SplatIO
 import CryptoKit
 
+extension String {
+    var localized: String {
+        NSLocalizedString(self, comment: "")
+    }
+
+    func localizedFormat(_ arguments: CVarArg...) -> String {
+        String(format: localized, locale: Locale.current, arguments: arguments)
+    }
+}
+
 @main
 struct OpenReshotApp: App {
     var body: some Scene {
@@ -29,8 +39,8 @@ enum RenderQuality: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .high: return "高清"
-        case .smooth: return "流畅"
+        case .high: return "高清".localized
+        case .smooth: return "流畅".localized
         }
     }
 
@@ -76,8 +86,8 @@ enum ReshotViewAngleMode: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .standard: return "标准"
-        case .wide: return "大角度"
+        case .standard: return "标准".localized
+        case .wide: return "大角度".localized
         }
     }
 
@@ -129,7 +139,7 @@ enum MotionExportFormat: String, CaseIterable, Identifiable {
         switch self {
         case .mp4: return "MP4"
         case .livePhoto: return "Live"
-        case .momentsLivePhoto: return "朋友圈"
+        case .momentsLivePhoto: return "朋友圈".localized
         case .gif: return "GIF"
         }
     }
@@ -145,10 +155,10 @@ enum MotionExportFormat: String, CaseIterable, Identifiable {
 
     var savedMessage: String {
         switch self {
-        case .mp4: return "MP4 已保存"
-        case .livePhoto: return "Live Photo 已保存"
-        case .momentsLivePhoto: return "朋友圈 Live 已保存"
-        case .gif: return "GIF 已保存"
+        case .mp4: return "MP4 已保存".localized
+        case .livePhoto: return "Live Photo 已保存".localized
+        case .momentsLivePhoto: return "朋友圈 Live 已保存".localized
+        case .gif: return "GIF 已保存".localized
         }
     }
 }
@@ -302,7 +312,7 @@ private enum ReshotCacheStore {
 
             guard let sourceData = sourceImage.jpegData(compressionQuality: 0.94),
                   let thumbnailData = thumbnailImage(from: sourceImage).jpegData(compressionQuality: 0.82) else {
-                throw err("缓存图片编码失败")
+                throw err("缓存图片编码失败".localized)
             }
             try sourceData.write(to: temporaryDirectory.appendingPathComponent(sourceImageName), options: [.atomic])
             try thumbnailData.write(to: temporaryDirectory.appendingPathComponent(thumbnailImageName), options: [.atomic])
@@ -779,7 +789,7 @@ final class AppState: ObservableObject {
         guard let points = currentCloudPoints,
               let metadata = currentPreviewMetadata,
               let imageData = inputImage?.pngData() else {
-            throw err("当前没有可导出的 3D 预览")
+            throw err("当前没有可导出的 3D 预览".localized)
         }
 
         let urls = try await Self.writePreviewExportPackage(
@@ -1275,12 +1285,12 @@ final class AppState: ObservableObject {
 
     private static func motionExportFailureMessage(format: MotionExportFormat, error: Error) -> String {
         if format.isLivePhotoPackage {
-            return "Live Photo 配对失败"
+            return "Live Photo 配对失败".localized
         }
         if error is CancellationError {
-            return "导出已取消"
+            return "导出已取消".localized
         }
-        return "\(format.title) 导出失败"
+        return "%@ 导出失败".localizedFormat(format.title)
     }
 
     @MainActor
@@ -1652,7 +1662,7 @@ final class AppState: ObservableObject {
         let (data, response) = try await URLSession.shared.upload(for: request, from: requestData)
         print("⏱️ [OpenReshot] Gemini response \(ms(since: requestStartedAt))ms, \(data.count / 1024)KB")
         guard let http = response as? HTTPURLResponse else {
-            throw err("无效响应")
+            throw err("无效响应".localized)
         }
         guard (200..<300).contains(http.statusCode) else {
             let body = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
@@ -1660,7 +1670,7 @@ final class AppState: ObservableObject {
         }
         guard let image = imageFromGeminiResponse(data) else {
             let detail = geminiResponseDetail(data)
-            throw err(detail.isEmpty ? "Gemini 没有返回图片" : "Gemini 没有返回图片: \(detail)")
+            throw err(detail.isEmpty ? "Gemini 没有返回图片".localized : "Gemini 没有返回图片: %@".localizedFormat(detail))
         }
         return image
     }
@@ -2077,7 +2087,7 @@ struct ContentView: View {
     @State private var generationStartedAt = Date()
     @State private var resultFlash = false
     @State private var saveToastVisible = false
-    @State private var saveToastMessage = "已保存到相册"
+    @State private var saveToastMessage = "已保存到相册".localized
     @State private var saveToastSystemImage = "checkmark"
     @State private var dragBaseTilt = SIMD2<Float>(0, 0)
     @State private var draggingStage = false
@@ -2202,7 +2212,7 @@ struct ContentView: View {
         }
         .onChange(of: app.saveState) { _, state in
             if state == .saved {
-                saveToastMessage = "已保存到相册"
+                saveToastMessage = "已保存到相册".localized
                 saveToastSystemImage = "checkmark"
                 withAnimation(.easeOut(duration: 0.20)) {
                     saveToastVisible = true
@@ -2217,7 +2227,7 @@ struct ContentView: View {
         .onChange(of: app.motionExportState) { _, state in
             if state == .saved {
                 motionExportMenuExpanded = false
-                saveToastMessage = app.motionExportFormat?.savedMessage ?? "已保存到相册"
+                saveToastMessage = app.motionExportFormat?.savedMessage ?? "已保存到相册".localized
                 saveToastSystemImage = "checkmark"
                 withAnimation(.easeOut(duration: 0.20)) {
                     saveToastVisible = true
@@ -2228,7 +2238,7 @@ struct ContentView: View {
                     }
                 }
             } else if state == .failed {
-                saveToastMessage = app.motionExportFailureMessage ?? "导出失败"
+                saveToastMessage = app.motionExportFailureMessage ?? "导出失败".localized
                 saveToastSystemImage = "exclamationmark.triangle"
                 withAnimation(.easeOut(duration: 0.20)) {
                     saveToastVisible = true
@@ -2682,15 +2692,15 @@ struct ContentView: View {
     private var failedRetryAccessibilityLabel: String {
         switch app.processFailureKind {
         case .missingAPIKey:
-            return "输入 Gemini API Key"
+            return "输入 Gemini API Key".localized
         case .enhancement:
-            return "重新拍摄"
+            return "重新拍摄".localized
         case .imageLoad:
-            return "重新选择照片"
+            return "重新选择照片".localized
         case .missingModel:
-            return "下载模型"
+            return "下载模型".localized
         case .reconstruction, nil:
-            return app.modelStore.activeModelURL() == nil ? "下载模型" : "重试构建空间"
+            return app.modelStore.activeModelURL() == nil ? "下载模型".localized : "重试构建空间".localized
         }
     }
 
@@ -2715,33 +2725,33 @@ struct ContentView: View {
     private var failedRetryLabel: String {
         switch app.processFailureKind {
         case .missingAPIKey:
-            return "输入 API"
+            return "输入 API".localized
         case .enhancement:
-            return "重试"
+            return "重试".localized
         case .imageLoad:
-            return "换图"
+            return "换图".localized
         case .missingModel:
-            return "下载模型"
+            return "下载模型".localized
         case .reconstruction, nil:
             guard app.modelStore.activeModelURL() != nil else {
-                return "下载模型"
+                return "下载模型".localized
             }
-            return "重试"
+            return "重试".localized
         }
     }
 
     private var failedCaption: String {
         switch app.processFailureKind {
         case .missingAPIKey:
-            return "需要输入 API Key 后拍摄"
+            return "需要输入 API Key 后拍摄".localized
         case .enhancement:
-            return "拍摄失败,请检查网络后重试"
+            return "拍摄失败,请检查网络后重试".localized
         case .imageLoad:
-            return "载入失败,请重新选择照片"
+            return "载入失败,请重新选择照片".localized
         case .missingModel:
-            return "需要下载模型后构建空间"
+            return "需要下载模型后构建空间".localized
         case .reconstruction, nil:
-            return "构建失败,请检查模型或重试"
+            return "构建失败,请检查模型或重试".localized
         }
     }
 
@@ -2750,16 +2760,16 @@ struct ContentView: View {
         case .missingAPIKey:
             return "API"
         case .enhancement:
-            return "设置"
+            return "设置".localized
         case .imageLoad:
-            return "设置"
+            return "设置".localized
         case .missingModel:
-            return "模型"
+            return "模型".localized
         case .reconstruction, nil:
             guard app.modelStore.activeModelURL() != nil else {
-                return "模型"
+                return "模型".localized
             }
-            return "设置"
+            return "设置".localized
         }
     }
 
@@ -2860,7 +2870,7 @@ struct ContentView: View {
                 composeAuxiliaryButton(systemImage: "camera.aperture", title: "镜头", scale: scale)
             }
             .buttonStyle(FluidPressButtonStyle(pressedScale: 0.94))
-            .accessibilityLabel(lensDockExpanded ? "收起镜头控制" : "打开镜头控制")
+            .accessibilityLabel(lensDockExpanded ? "收起镜头控制".localized : "打开镜头控制".localized)
             .offset(x: shutterMenuExpanded ? 66 * scale : 0, y: shutterMenuExpanded ? 0 : -2 * scale)
             .scaleEffect(shutterMenuExpanded ? 1 : 0.24)
             .opacity(shutterMenuExpanded ? 1 : 0)
@@ -2877,7 +2887,7 @@ struct ContentView: View {
                 composeAuxiliaryButton(systemImage: "square.and.arrow.up", title: "导出", scale: scale)
             }
             .buttonStyle(FluidPressButtonStyle(pressedScale: 0.94))
-            .accessibilityLabel(motionExportMenuExpanded ? "收起动效导出" : "打开动效导出")
+            .accessibilityLabel(motionExportMenuExpanded ? "收起动效导出".localized : "打开动效导出".localized)
             .offset(x: shutterMenuExpanded ? 132 * scale : 0, y: shutterMenuExpanded ? 0 : -2 * scale)
             .scaleEffect(shutterMenuExpanded ? 1 : 0.24)
             .opacity(shutterMenuExpanded ? 1 : 0)
@@ -3020,7 +3030,7 @@ struct ContentView: View {
             }
             .shadow(color: .black.opacity(0.30), radius: 14, y: 6)
 
-            Text(title)
+            Text(title.localized)
                 .font(.system(size: 9 * scale, weight: .semibold, design: .rounded))
                 .tracking(0.6)
                 .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.52))
@@ -3221,7 +3231,7 @@ struct ContentView: View {
                 )
         }
         .buttonStyle(FluidPressButtonStyle(pressedScale: 0.96))
-        .accessibilityLabel("切换到\(mode.title)视角")
+        .accessibilityLabel("%@ 视角".localizedFormat(mode.title))
     }
 
     private func motionExportDock(width: CGFloat, scale: CGFloat) -> some View {
@@ -3275,7 +3285,7 @@ struct ContentView: View {
         }
         .disabled(!enabled)
         .buttonStyle(FluidPressButtonStyle(pressedScale: 0.96))
-        .accessibilityLabel("导出\(format.title)")
+        .accessibilityLabel("导出 %@".localizedFormat(format.title))
     }
 
     private func motionExportEnabled(_ format: MotionExportFormat) -> Bool {
@@ -3298,7 +3308,7 @@ struct ContentView: View {
             return "\(Int(app.motionExportProgress * 100))%"
         }
         if app.motionExportState == .failed, app.motionExportFormat == format {
-            return "重试"
+            return "重试".localized
         }
         return format.title
     }
@@ -3331,7 +3341,7 @@ struct ContentView: View {
                 .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.58))
                 .frame(width: 14 * scale)
 
-            Text(leading)
+            Text(leading.localized)
                 .font(.system(size: 8.5 * scale, weight: .semibold, design: .rounded))
                 .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.52))
                 .frame(width: 25 * scale, alignment: .leading)
@@ -3467,7 +3477,7 @@ struct ContentView: View {
     @ViewBuilder
     private func photoStageCaption(phase: ReshotFlowPhase, scale: CGFloat) -> some View {
         if let caption = flowCaption(for: phase) {
-            Text(caption)
+            Text(caption.localized)
                 .font(.system(size: 13 * scale, weight: .medium, design: .rounded))
                 .tracking(-0.1)
                 .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.78))
@@ -3493,17 +3503,17 @@ struct ContentView: View {
     private func flowRingLabel(for phase: ReshotFlowPhase) -> String {
         switch phase {
         case .previewLoading:
-            return "载入预览"
+            return "载入预览".localized
         case .preview:
             return ""
         case .inferring:
-            return "构建空间"
+            return "构建空间".localized
         case .failed:
             return failedRetryLabel
         case .compose:
-            return "开始拍摄"
+            return "开始拍摄".localized
         case .generating:
-            return "正在拍摄"
+            return "正在拍摄".localized
         case .result:
             return ""
         }
@@ -3606,7 +3616,7 @@ struct ContentView: View {
                 )
             }
             .buttonStyle(FluidPressButtonStyle(pressedScale: 0.96))
-            .accessibilityLabel(comparingResult ? "显示成片" : "对比原图")
+            .accessibilityLabel(comparingResult ? "显示成片".localized : "对比原图".localized)
             .offset(x: resultMenuExpanded ? -88 * scale : 0, y: resultMenuExpanded ? 0 : -2 * scale)
             .scaleEffect(resultMenuExpanded ? 1 : 0.24)
             .opacity(resultMenuExpanded ? 1 : 0)
@@ -3666,7 +3676,7 @@ struct ContentView: View {
             }
             .shadow(color: .black.opacity(0.30), radius: 14, y: 6)
 
-            Text(title)
+            Text(title.localized)
                 .font(.system(size: 9 * scale, weight: .semibold, design: .rounded))
                 .tracking(0.6)
                 .foregroundStyle(highlighted ? OpenReshotPalette.twilightAccent.opacity(0.72) : OpenReshotPalette.twilightText.opacity(0.52))
@@ -3685,10 +3695,10 @@ struct ContentView: View {
 
     private var saveButtonText: String {
         switch app.saveState {
-        case .saving: return "保存中"
-        case .saved: return "已保存"
-        case .failed: return "重试"
-        case .idle: return "保存"
+        case .saving: return "保存中".localized
+        case .saved: return "已保存".localized
+        case .failed: return "重试".localized
+        case .idle: return "保存".localized
         }
     }
 
@@ -3697,7 +3707,7 @@ struct ContentView: View {
             Image(systemName: saveToastSystemImage)
                 .font(.system(size: 12 * scale, weight: .bold))
 
-            Text(saveToastMessage)
+            Text(saveToastMessage.localized)
                 .font(.system(size: 12 * scale, weight: .semibold, design: .rounded))
         }
         .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.88))
@@ -4098,7 +4108,7 @@ struct ContentView: View {
     }
 
     private func comparisonBadge(_ title: String) -> some View {
-        Text(title)
+        Text(title.localized)
             .font(.system(size: 11, weight: .bold, design: .rounded))
             .tracking(1.6)
             .foregroundStyle(OpenReshotPalette.twilightText.opacity(0.88))
@@ -4323,7 +4333,7 @@ private struct ReshotGalleryView: View {
                     .font(.system(size: 18, weight: .semibold, design: .rounded))
                     .foregroundStyle(SettingsSheetStyle.primaryText)
 
-                Text("\(app.galleryItems.count) 个空间")
+                Text("%d 个空间".localizedFormat(app.galleryItems.count))
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundStyle(SettingsSheetStyle.tertiaryText)
             }
@@ -4382,12 +4392,12 @@ private struct ReshotGalleryView: View {
             )
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(ReshotCacheStore.isBundledItem(item) ? "默认预览" : Self.dateFormatter.string(from: item.createdAt))
+                Text(ReshotCacheStore.isBundledItem(item) ? "默认预览".localized : Self.dateFormatter.string(from: item.createdAt))
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(SettingsSheetStyle.primaryText)
                     .lineLimit(1)
 
-                Text("\(qualityLabel(item.quality)) · \(Self.countFormatter.string(from: NSNumber(value: item.splatCount)) ?? "\(item.splatCount)") 点")
+                Text("%@ · %@ 点".localizedFormat(qualityLabel(item.quality), Self.countFormatter.string(from: NSNumber(value: item.splatCount)) ?? "\(item.splatCount)"))
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundStyle(SettingsSheetStyle.secondaryText)
                     .lineLimit(1)
@@ -4406,20 +4416,20 @@ private struct ReshotGalleryView: View {
     private func qualityLabel(_ rawValue: String) -> String {
         switch RenderQuality(rawValue: rawValue) {
         case .some(.high):
-            return "高清"
+            return "高清".localized
         case .some(.smooth):
-            return "流畅"
+            return "流畅".localized
         case .none:
             if rawValue == "demo" {
-                return "内置示例"
+                return "内置示例".localized
             }
-            return "缓存"
+            return "缓存".localized
         }
     }
 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.dateFormat = "M月d日 HH:mm"
+        formatter.setLocalizedDateFormatFromTemplate("MdHm")
         return formatter
     }()
 
@@ -4624,7 +4634,7 @@ struct SettingsView: View {
 
                     if case let .failed(message) = modelStore.installState {
                         divider
-                        Label(message.isEmpty ? "下载失败" : message, systemImage: "exclamationmark.triangle")
+                        Label(message.isEmpty ? "下载失败".localized : message, systemImage: "exclamationmark.triangle")
                             .font(.system(size: 12, weight: .regular))
                             .foregroundStyle(Color.red.opacity(0.88))
                             .padding(.vertical, 14)
@@ -4696,7 +4706,7 @@ struct SettingsView: View {
     }
 
     private func modelStatusCapsule(title: String, systemImage: String) -> some View {
-        Label(title, systemImage: systemImage)
+        Label(title.localized, systemImage: systemImage)
             .font(.system(size: 11, weight: .semibold, design: .rounded))
             .labelStyle(.titleAndIcon)
             .foregroundStyle(modelStatusForeground)
@@ -4872,7 +4882,7 @@ struct SettingsView: View {
     }
 
     private func sectionLabel(_ text: String) -> some View {
-        Text(text)
+        Text(text.localized)
             .font(.system(size: 10, weight: .semibold, design: .rounded))
             .tracking(3.5)
             .foregroundStyle(SettingsSheetStyle.primaryText.opacity(0.40))
@@ -4915,7 +4925,7 @@ struct SettingsView: View {
     private var downloadProgressText: String {
         let progress = modelStore.progress
         guard progress.bytesReceived > 0 else {
-            return "正在连接 \(modelActiveSourceLabel)"
+            return "正在连接 %@".localizedFormat(modelActiveSourceLabel)
         }
         let received = Self.byteFormatter.string(fromByteCount: progress.bytesReceived)
         if let total = progress.totalBytes {
@@ -4927,7 +4937,7 @@ struct SettingsView: View {
             }
             return "\(percent)% · \(received) / \(totalText)"
         }
-        return "已下载 \(received)"
+        return "已下载 %@".localizedFormat(received)
     }
 
     private var shouldShowModelActivity: Bool {
@@ -4943,8 +4953,8 @@ struct SettingsView: View {
         switch modelStore.installState {
         case .checkingSource:
             return modelStore.hasResumeProgress
-                ? "正在准备继续下载"
-                : "正在连接 \(modelStore.primaryDownloadSourceLabel)"
+                ? "正在准备继续下载".localized
+                : "正在连接 %@".localizedFormat(modelStore.primaryDownloadSourceLabel)
         case .downloading:
             return downloadProgressText
         default:
@@ -4957,25 +4967,27 @@ struct SettingsView: View {
     }
 
     private var modelTransferVerb: String {
-        modelStore.hasResumeProgress ? "继续" : "正在"
+        modelStore.hasResumeProgress ? "继续".localized : "正在".localized
     }
 
     private var modelStateCaption: String {
         switch modelStore.installState {
         case .downloaded:
-            return "本机模型已就绪"
+            return "本机模型已就绪".localized
         case .bundled:
-            return "随 App 内置可用"
+            return "随 App 内置可用".localized
         case .checkingSource:
             return modelStore.hasResumeProgress
-                ? "正在准备继续下载"
-                : "正在连接 \(modelStore.primaryDownloadSourceLabel)"
+                ? "正在准备继续下载".localized
+                : "正在连接 %@".localizedFormat(modelStore.primaryDownloadSourceLabel)
         case .downloading:
-            return "\(modelTransferVerb)从 \(modelActiveSourceLabel) 下载"
+            return modelStore.hasResumeProgress
+                ? "继续从 %@ 下载".localizedFormat(modelActiveSourceLabel)
+                : "正在从 %@ 下载".localizedFormat(modelActiveSourceLabel)
         case .failed:
-            return "模型状态需要处理"
+            return "模型状态需要处理".localized
         case .notInstalled:
-            return modelStore.hasResumeProgress ? "可继续上次下载" : "首次重构前需要下载"
+            return modelStore.hasResumeProgress ? "可继续上次下载".localized : "首次重构前需要下载".localized
         }
     }
 
@@ -5144,7 +5156,7 @@ private struct GeminiAPIHelpOverlay: View {
                 .frame(width: 20, height: 20)
                 .background(SettingsSheetStyle.controlFill, in: Circle())
 
-            Text(text)
+            Text(text.localized)
                 .font(.system(size: 14, weight: .regular))
                 .foregroundStyle(SettingsSheetStyle.primaryText)
                 .lineSpacing(3)
