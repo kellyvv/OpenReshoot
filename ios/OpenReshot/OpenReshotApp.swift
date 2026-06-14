@@ -424,6 +424,7 @@ final class AppState: ObservableObject {
     private static let geminiInputMaxSide: CGFloat = 1024
     private static let motionExportFPS = 24
     private static let motionExportFrameCount = 96
+    private static let motionExportTiltRange: Float = 0.34
     private static let livePhotoStillFrameIndex = 0
     private static let motionExportMaxLongSide: CGFloat = 960
     private static let geminiModel = "gemini-3.1-flash-image"
@@ -1337,7 +1338,7 @@ final class AppState: ObservableObject {
             size: Self.motionExportSize(for: imageAspect),
             fps: Self.motionExportFPS,
             frameCount: Self.motionExportFrameCount,
-            tiltRange: ReshotViewAngleMode.standard.exportTiltRange,
+            tiltRange: Self.motionExportTiltRange,
             path: .centerOrbit(clockwise: true)
         )
     }
