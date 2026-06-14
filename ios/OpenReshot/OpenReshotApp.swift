@@ -1370,7 +1370,7 @@ final class AppState: ObservableObject {
         return UIGraphicsImageRenderer(size: size, format: format).image { _ in
             image.draw(in: CGRect(origin: .zero, size: size))
 
-            let label = "OpenReshot"
+            let label = "Reshot"
             let fontSize = max(11, min(size.width, size.height) * 0.026)
             let attributes: [NSAttributedString.Key: Any] = [
                 .font: UIFont.systemFont(ofSize: fontSize, weight: .semibold),
