@@ -426,7 +426,7 @@ final class AppState: ObservableObject {
     private static let motionExportFrameCount = 96
     private static let motionExportTiltRange: Float = 0.34
     private static let livePhotoStillFrameIndex = 0
-    private static let motionExportMaxLongSide: CGFloat = 960
+    private static let motionExportMaxLongSide: CGFloat = 1920
     private static let geminiModel = "gemini-3.1-flash-image"
     private static let demoSceneResource = "DemoFLOW"
     private static let demoSceneFocalPixels: Float = 1330.3168
@@ -1418,6 +1418,7 @@ final class AppState: ObservableObject {
             throw err("Live Photo still image encode failed")
         }
         let metadata: [CFString: Any] = [
+            kCGImageDestinationLossyCompressionQuality: 0.96,
             kCGImagePropertyMakerAppleDictionary: [
                 "17": assetIdentifier
             ]

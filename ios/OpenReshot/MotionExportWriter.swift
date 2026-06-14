@@ -52,6 +52,9 @@ struct MotionFramePlan {
 }
 
 final class MotionVideoWriter: @unchecked Sendable {
+    private static let minimumAverageBitRate = 8_000_000
+    private static let averageBitsPerPixel = 10
+
     private let writer: AVAssetWriter
     private let input: AVAssetWriterInput
     private let adaptor: AVAssetWriterInputPixelBufferAdaptor
@@ -80,8 +83,11 @@ final class MotionVideoWriter: @unchecked Sendable {
         writer = try AVAssetWriter(outputURL: url, fileType: fileType)
 
         let compression: [String: Any] = [
-            AVVideoAverageBitRateKey: max(2_000_000, width * height * 7),
-            AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel
+            AVVideoAverageBitRateKey: max(Self.minimumAverageBitRate, width * height * Self.averageBitsPerPixel),
+            AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
+            AVVideoH264EntropyModeKey: AVVideoH264EntropyModeCABAC,
+            AVVideoExpectedSourceFrameRateKey: fps,
+            AVVideoMaxKeyFrameIntervalKey: fps
         ]
         let outputSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
