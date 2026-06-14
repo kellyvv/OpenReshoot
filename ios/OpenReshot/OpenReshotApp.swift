@@ -113,14 +113,23 @@ enum MotionExportState {
 enum MotionExportFormat: String, CaseIterable, Identifiable {
     case mp4
     case livePhoto
+    case momentsLivePhoto
     case gif
 
     var id: String { rawValue }
+
+    var isLivePhotoPackage: Bool {
+        switch self {
+        case .livePhoto, .momentsLivePhoto: return true
+        case .mp4, .gif: return false
+        }
+    }
 
     var title: String {
         switch self {
         case .mp4: return "MP4"
         case .livePhoto: return "Live"
+        case .momentsLivePhoto: return "朋友圈"
         case .gif: return "GIF"
         }
     }
@@ -129,6 +138,7 @@ enum MotionExportFormat: String, CaseIterable, Identifiable {
         switch self {
         case .mp4: return "play.rectangle"
         case .livePhoto: return "livephoto"
+        case .momentsLivePhoto: return "bubble.left.and.bubble.right"
         case .gif: return "sparkles.rectangle.stack"
         }
     }
@@ -137,6 +147,7 @@ enum MotionExportFormat: String, CaseIterable, Identifiable {
         switch self {
         case .mp4: return "MP4 已保存"
         case .livePhoto: return "Live Photo 已保存"
+        case .momentsLivePhoto: return "朋友圈 Live 已保存"
         case .gif: return "GIF 已保存"
         }
     }
@@ -426,6 +437,10 @@ final class AppState: ObservableObject {
     private static let motionExportFrameCount = 96
     private static let motionExportTiltRange: Float = 0.34
     private static let livePhotoStillFrameIndex = 0
+    private static let momentsLivePhotoFPS = 30
+    private static let momentsLivePhotoFrameCount = 90
+    private static let momentsLivePhotoStillFrameIndex = 45
+    private static let momentsLivePhotoTiltRange: Float = 0.24
     private static let motionExportMaxLongSide: CGFloat = 1920
     private static let geminiModel = "gemini-3.1-flash-image"
     private static let demoSceneResource = "DemoFLOW"
@@ -1219,7 +1234,7 @@ final class AppState: ObservableObject {
             guard let self else { return }
             do {
                 let package = try await self.renderMotionExportPackage(format: format, renderer: renderer)
-                if format == .livePhoto {
+                if format.isLivePhotoPackage {
                     try await Self.validateLivePhotoPackage(package)
                 }
                 try await Self.saveMotionExportPackage(package)
@@ -1260,7 +1275,7 @@ final class AppState: ObservableObject {
     }
 
     private static func motionExportFailureMessage(format: MotionExportFormat, error: Error) -> String {
-        if format == .livePhoto {
+        if format.isLivePhotoPackage {
             return "Live Photo 配对失败"
         }
         if error is CancellationError {
@@ -1292,16 +1307,18 @@ final class AppState: ObservableObject {
             try MotionGIFWriter.finalize(destination)
             return MotionExportPackage(format: .gif, videoURL: nil, gifURL: gifURL, livePhotoImageURL: nil, livePhotoVideoURL: nil)
 
-        case .mp4, .livePhoto:
-            let livePhotoIdentifier = format == .livePhoto ? Self.makeLivePhotoAssetIdentifier() : nil
-            let videoURL = directory.appendingPathComponent(format == .livePhoto ? "OpenReshot.mov" : "OpenReshot.mp4")
+        case .mp4, .livePhoto, .momentsLivePhoto:
+            let livePhotoIdentifier = format.isLivePhotoPackage ? Self.makeLivePhotoAssetIdentifier() : nil
+            let stillFrameIndex = Self.livePhotoStillFrameIndex(for: format)
+            let videoURL = directory.appendingPathComponent(format.isLivePhotoPackage ? "OpenReshot.mov" : "OpenReshot.mp4")
             let writer = try MotionVideoWriter(
                 url: videoURL,
-                fileType: format == .livePhoto ? .mov : .mp4,
+                fileType: format.isLivePhotoPackage ? .mov : .mp4,
+                videoCodec: format == .momentsLivePhoto ? .hevc : .h264,
                 size: plan.size,
                 fps: plan.fps,
                 contentIdentifier: livePhotoIdentifier,
-                stillImageFrameIndex: format == .livePhoto ? Self.livePhotoStillFrameIndex : nil
+                stillImageFrameIndex: stillFrameIndex
             )
             for frameIndex in 0..<plan.frameCount {
                 try Task.checkCancellation()
@@ -1314,16 +1331,17 @@ final class AppState: ObservableObject {
             }
             try await writer.finish()
 
-            guard format == .livePhoto else {
+            guard format.isLivePhotoPackage else {
                 return MotionExportPackage(format: .mp4, videoURL: videoURL, gifURL: nil, livePhotoImageURL: nil, livePhotoVideoURL: nil)
             }
-            guard let livePhotoIdentifier else {
+            guard let livePhotoIdentifier, let stillFrameIndex else {
                 throw err("Live Photo identifier missing")
             }
-            let stillURL = directory.appendingPathComponent("OpenReshot.jpg")
-            let stillFrame = try motionExportFrame(renderer: renderer, plan: plan, frameIndex: Self.livePhotoStillFrameIndex)
-            try Self.writeLivePhotoStillJPEG(stillFrame, assetIdentifier: livePhotoIdentifier, to: stillURL)
-            return MotionExportPackage(format: .livePhoto, videoURL: nil, gifURL: nil, livePhotoImageURL: stillURL, livePhotoVideoURL: videoURL)
+            let stillFormat = Self.livePhotoStillFormat(for: format)
+            let stillURL = directory.appendingPathComponent("OpenReshot.\(stillFormat.preferredFilenameExtension ?? "jpg")")
+            let stillFrame = try motionExportFrame(renderer: renderer, plan: plan, frameIndex: stillFrameIndex)
+            try Self.writeLivePhotoStillImage(stillFrame, assetIdentifier: livePhotoIdentifier, type: stillFormat, to: stillURL)
+            return MotionExportPackage(format: format, videoURL: nil, gifURL: nil, livePhotoImageURL: stillURL, livePhotoVideoURL: videoURL)
         }
     }
 
@@ -1333,7 +1351,16 @@ final class AppState: ObservableObject {
         return Self.watermarkedExportFrame(frame)
     }
 
-    private func motionFramePlan(for _: MotionExportFormat) -> MotionFramePlan {
+    private func motionFramePlan(for format: MotionExportFormat) -> MotionFramePlan {
+        if format == .momentsLivePhoto {
+            return MotionFramePlan(
+                size: Self.motionExportSize(for: imageAspect),
+                fps: Self.momentsLivePhotoFPS,
+                frameCount: Self.momentsLivePhotoFrameCount,
+                tiltRange: Self.momentsLivePhotoTiltRange,
+                path: .centeredOrbit(clockwise: true, stillFrameIndex: Self.momentsLivePhotoStillFrameIndex)
+            )
+        }
         return MotionFramePlan(
             size: Self.motionExportSize(for: imageAspect),
             fps: Self.motionExportFPS,
@@ -1341,6 +1368,14 @@ final class AppState: ObservableObject {
             tiltRange: Self.motionExportTiltRange,
             path: .centerOrbit(clockwise: true)
         )
+    }
+
+    private static func livePhotoStillFrameIndex(for format: MotionExportFormat) -> Int? {
+        switch format {
+        case .livePhoto: return livePhotoStillFrameIndex
+        case .momentsLivePhoto: return momentsLivePhotoStillFrameIndex
+        case .mp4, .gif: return nil
+        }
     }
 
     private static func motionExportSize(for aspect: CGFloat) -> CGSize {
@@ -1408,13 +1443,17 @@ final class AppState: ObservableObject {
         UUID().uuidString
     }
 
-    private static func writeLivePhotoStillJPEG(_ image: UIImage, assetIdentifier: String, to url: URL) throws {
+    private static func livePhotoStillFormat(for format: MotionExportFormat) -> UTType {
+        format == .momentsLivePhoto ? .heic : .jpeg
+    }
+
+    private static func writeLivePhotoStillImage(_ image: UIImage, assetIdentifier: String, type: UTType, to url: URL) throws {
         try? FileManager.default.removeItem(at: url)
         guard assetIdentifier.count == 36 else {
             throw err("Live Photo asset identifier must be a 36-character UUID")
         }
         guard let cgImage = image.cgImage,
-              let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.jpeg.identifier as CFString, 1, nil) else {
+              let destination = CGImageDestinationCreateWithURL(url as CFURL, type.identifier as CFString, 1, nil) else {
             throw err("Live Photo still image encode failed")
         }
         let metadata: [CFString: Any] = [
@@ -1442,7 +1481,13 @@ final class AppState: ObservableObject {
                   let videoURL = package.livePhotoVideoURL else {
                 throw err("Live Photo export missing")
             }
-            try await saveLivePhotoToPhotoLibrary(imageURL: imageURL, videoURL: videoURL)
+            try await saveLivePhotoToPhotoLibrary(imageURL: imageURL, imageTypeIdentifier: livePhotoStillFormat(for: package.format).identifier, videoURL: videoURL)
+        case .momentsLivePhoto:
+            guard let imageURL = package.livePhotoImageURL,
+                  let videoURL = package.livePhotoVideoURL else {
+                throw err("Live Photo export missing")
+            }
+            try await saveLivePhotoToPhotoLibrary(imageURL: imageURL, imageTypeIdentifier: livePhotoStillFormat(for: package.format).identifier, videoURL: videoURL)
         }
     }
 
@@ -1536,13 +1581,13 @@ final class AppState: ObservableObject {
         }
     }
 
-    private static func saveLivePhotoToPhotoLibrary(imageURL: URL, videoURL: URL) async throws {
+    private static func saveLivePhotoToPhotoLibrary(imageURL: URL, imageTypeIdentifier: String, videoURL: URL) async throws {
         try await ensurePhotoLibraryAddAuthorization()
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             PHPhotoLibrary.shared().performChanges {
                 let request = PHAssetCreationRequest.forAsset()
                 let photoOptions = PHAssetResourceCreationOptions()
-                photoOptions.uniformTypeIdentifier = UTType.jpeg.identifier
+                photoOptions.uniformTypeIdentifier = imageTypeIdentifier
                 let videoOptions = PHAssetResourceCreationOptions()
                 videoOptions.uniformTypeIdentifier = UTType.quickTimeMovie.identifier
                 request.addResource(with: .photo, fileURL: imageURL, options: photoOptions)

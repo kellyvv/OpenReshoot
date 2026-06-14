@@ -16,6 +16,7 @@ struct MotionExportPackage {
 struct MotionFramePlan {
     enum Path {
         case centerOrbit(clockwise: Bool)
+        case centeredOrbit(clockwise: Bool, stillFrameIndex: Int)
     }
 
     let size: CGSize
@@ -32,6 +33,8 @@ struct MotionFramePlan {
         switch path {
         case .centerOrbit(let clockwise):
             return centerOrbitTilt(at: index, clockwise: clockwise)
+        case .centeredOrbit(let clockwise, let stillFrameIndex):
+            return centeredOrbitTilt(at: index, clockwise: clockwise, stillFrameIndex: stillFrameIndex)
         }
     }
 
@@ -42,6 +45,17 @@ struct MotionFramePlan {
         let radius = tiltRange * easeOut(ramp)
         let direction: Float = clockwise ? -1 : 1
         let angle = (-.pi / 2) + direction * progress * .pi * 2 * 0.86
+        return SIMD2(cos(angle) * radius, sin(angle) * radius)
+    }
+
+    private func centeredOrbitTilt(at index: Int, clockwise: Bool, stillFrameIndex: Int) -> SIMD2<Float> {
+        let clampedStillFrame = min(max(stillFrameIndex, 0), max(frameCount - 1, 0))
+        guard index != clampedStillFrame else { return .zero }
+        let span = index < clampedStillFrame ? max(clampedStillFrame, 1) : max(frameCount - 1 - clampedStillFrame, 1)
+        let signedProgress = Float(index - clampedStillFrame) / Float(span)
+        let radius = tiltRange * easeOut(abs(signedProgress))
+        let direction: Float = clockwise ? -1 : 1
+        let angle = (-.pi / 2) + direction * signedProgress * .pi * 0.72
         return SIMD2(cos(angle) * radius, sin(angle) * radius)
     }
 
@@ -69,6 +83,7 @@ final class MotionVideoWriter: @unchecked Sendable {
     init(
         url: URL,
         fileType: AVFileType = .mp4,
+        videoCodec: AVVideoCodecType = .h264,
         size: CGSize,
         fps: Int,
         contentIdentifier: String? = nil,
@@ -82,15 +97,17 @@ final class MotionVideoWriter: @unchecked Sendable {
         try? FileManager.default.removeItem(at: url)
         writer = try AVAssetWriter(outputURL: url, fileType: fileType)
 
-        let compression: [String: Any] = [
+        var compression: [String: Any] = [
             AVVideoAverageBitRateKey: max(Self.minimumAverageBitRate, width * height * Self.averageBitsPerPixel),
-            AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
-            AVVideoH264EntropyModeKey: AVVideoH264EntropyModeCABAC,
-            AVVideoExpectedSourceFrameRateKey: fps,
-            AVVideoMaxKeyFrameIntervalKey: fps
+            AVVideoExpectedSourceFrameRateKey: fps
         ]
+        if videoCodec == .h264 {
+            compression[AVVideoProfileLevelKey] = AVVideoProfileLevelH264HighAutoLevel
+            compression[AVVideoH264EntropyModeKey] = AVVideoH264EntropyModeCABAC
+            compression[AVVideoMaxKeyFrameIntervalKey] = fps
+        }
         let outputSettings: [String: Any] = [
-            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoCodecKey: videoCodec,
             AVVideoWidthKey: width,
             AVVideoHeightKey: height,
             AVVideoCompressionPropertiesKey: compression
