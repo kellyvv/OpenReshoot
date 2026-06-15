@@ -127,14 +127,13 @@ enum MotionExportState {
 enum MotionExportFormat: String, CaseIterable, Identifiable {
     case mp4
     case livePhoto
-    case momentsLivePhoto
     case gif
 
     var id: String { rawValue }
 
     var isLivePhotoPackage: Bool {
         switch self {
-        case .livePhoto, .momentsLivePhoto: return true
+        case .livePhoto: return true
         case .mp4, .gif: return false
         }
     }
@@ -143,7 +142,6 @@ enum MotionExportFormat: String, CaseIterable, Identifiable {
         switch self {
         case .mp4: return "MP4"
         case .livePhoto: return "Live"
-        case .momentsLivePhoto: return "朋友圈".localized
         case .gif: return "GIF"
         }
     }
@@ -152,7 +150,6 @@ enum MotionExportFormat: String, CaseIterable, Identifiable {
         switch self {
         case .mp4: return "play.rectangle"
         case .livePhoto: return "livephoto"
-        case .momentsLivePhoto: return "bubble.left.and.bubble.right"
         case .gif: return "sparkles.rectangle.stack"
         }
     }
@@ -161,7 +158,6 @@ enum MotionExportFormat: String, CaseIterable, Identifiable {
         switch self {
         case .mp4: return "MP4 已保存".localized
         case .livePhoto: return "Live Photo 已保存".localized
-        case .momentsLivePhoto: return "朋友圈 Live 已保存".localized
         case .gif: return "GIF 已保存".localized
         }
     }
@@ -444,16 +440,15 @@ final class AppState: ObservableObject {
     private var pendingCachedReshot: ReshotCacheItem?
     private var demoScenePending = false
     private var didLoadDemoScene = false
-    private var didStartDemoModelPrefetch = false
     private var lensDefaultFocusDepth: Float = 1
     private static let geminiInputMaxSide: CGFloat = 1024
     private static let motionExportFPS = 24
     private static let motionExportFrameCount = 96
     private static let motionExportTiltRange: Float = 0.34
+    private static let livePhotoFPS = 30
+    private static let livePhotoFrameCount = 90
     private static let livePhotoStillFrameIndex = 0
-    private static let momentsLivePhotoFPS = 30
-    private static let momentsLivePhotoFrameCount = 90
-    private static let momentsLivePhotoStillFrameIndex = 0
+    private static let livePhotoStillFormat: UTType = .heic
     private static let motionExportMaxLongSide: CGFloat = 1920
     private static let geminiModel = "gemini-3.1-flash-image"
     private static let demoSceneResource = "DemoFLOW"
@@ -571,7 +566,6 @@ final class AppState: ObservableObject {
         status = ""
         demoScenePending = true
         startPendingDemoSceneIfPossible()
-        prefetchModelForDemoIfNeeded()
     }
 
     @MainActor
@@ -1122,15 +1116,6 @@ final class AppState: ObservableObject {
         return backward...maxForwardLensDolly
     }
 
-    @MainActor
-    private func prefetchModelForDemoIfNeeded() {
-        guard !didStartDemoModelPrefetch,
-              modelStore.activeModelURL() == nil,
-              !modelStore.isDownloading else { return }
-        didStartDemoModelPrefetch = true
-        modelStore.installModel()
-    }
-
     private static func writePreviewExportPackage(
         points: [SplatPoint],
         imageData: Data,
@@ -1320,14 +1305,14 @@ final class AppState: ObservableObject {
             try MotionGIFWriter.finalize(destination)
             return MotionExportPackage(format: .gif, videoURL: nil, gifURL: gifURL, livePhotoImageURL: nil, livePhotoVideoURL: nil)
 
-        case .mp4, .livePhoto, .momentsLivePhoto:
+        case .mp4, .livePhoto:
             let livePhotoIdentifier = format.isLivePhotoPackage ? Self.makeLivePhotoAssetIdentifier() : nil
             let stillFrameIndex = Self.livePhotoStillFrameIndex(for: format)
             let videoURL = directory.appendingPathComponent(format.isLivePhotoPackage ? "OpenReshot.mov" : "OpenReshot.mp4")
             let writer = try MotionVideoWriter(
                 url: videoURL,
                 fileType: format.isLivePhotoPackage ? .mov : .mp4,
-                videoCodec: format == .momentsLivePhoto ? .hevc : .h264,
+                videoCodec: format == .livePhoto ? .hevc : .h264,
                 size: plan.size,
                 fps: plan.fps,
                 contentIdentifier: livePhotoIdentifier,
@@ -1350,7 +1335,7 @@ final class AppState: ObservableObject {
             guard let livePhotoIdentifier, let stillFrameIndex else {
                 throw err("Live Photo identifier missing")
             }
-            let stillFormat = Self.livePhotoStillFormat(for: format)
+            let stillFormat = Self.livePhotoStillFormat
             let stillURL = directory.appendingPathComponent("OpenReshot.\(stillFormat.preferredFilenameExtension ?? "jpg")")
             let stillFrame = try motionExportFrame(renderer: renderer, plan: plan, frameIndex: stillFrameIndex)
             try Self.writeLivePhotoStillImage(stillFrame, assetIdentifier: livePhotoIdentifier, type: stillFormat, to: stillURL)
@@ -1365,11 +1350,11 @@ final class AppState: ObservableObject {
     }
 
     private func motionFramePlan(for format: MotionExportFormat) -> MotionFramePlan {
-        if format == .momentsLivePhoto {
+        if format == .livePhoto {
             return MotionFramePlan(
                 size: Self.motionExportSize(for: imageAspect),
-                fps: Self.momentsLivePhotoFPS,
-                frameCount: Self.momentsLivePhotoFrameCount,
+                fps: Self.livePhotoFPS,
+                frameCount: Self.livePhotoFrameCount,
                 tiltRange: Self.motionExportTiltRange,
                 path: .centerOrbit(clockwise: true)
             )
@@ -1386,7 +1371,6 @@ final class AppState: ObservableObject {
     private static func livePhotoStillFrameIndex(for format: MotionExportFormat) -> Int? {
         switch format {
         case .livePhoto: return livePhotoStillFrameIndex
-        case .momentsLivePhoto: return momentsLivePhotoStillFrameIndex
         case .mp4, .gif: return nil
         }
     }
@@ -1456,10 +1440,6 @@ final class AppState: ObservableObject {
         UUID().uuidString
     }
 
-    private static func livePhotoStillFormat(for format: MotionExportFormat) -> UTType {
-        format == .momentsLivePhoto ? .heic : .jpeg
-    }
-
     private static func writeLivePhotoStillImage(_ image: UIImage, assetIdentifier: String, type: UTType, to url: URL) throws {
         try? FileManager.default.removeItem(at: url)
         guard assetIdentifier.count == 36 else {
@@ -1494,13 +1474,7 @@ final class AppState: ObservableObject {
                   let videoURL = package.livePhotoVideoURL else {
                 throw err("Live Photo export missing")
             }
-            try await saveLivePhotoToPhotoLibrary(imageURL: imageURL, imageTypeIdentifier: livePhotoStillFormat(for: package.format).identifier, videoURL: videoURL)
-        case .momentsLivePhoto:
-            guard let imageURL = package.livePhotoImageURL,
-                  let videoURL = package.livePhotoVideoURL else {
-                throw err("Live Photo export missing")
-            }
-            try await saveLivePhotoToPhotoLibrary(imageURL: imageURL, imageTypeIdentifier: livePhotoStillFormat(for: package.format).identifier, videoURL: videoURL)
+            try await saveLivePhotoToPhotoLibrary(imageURL: imageURL, imageTypeIdentifier: livePhotoStillFormat.identifier, videoURL: videoURL)
         }
     }
 
@@ -2097,6 +2071,7 @@ struct ContentView: View {
     @State private var draggingStage = false
     @State private var showDragHint = false
     @State private var shutterMenuExpanded = false
+    @State private var previewActionExpanded = false
     @State private var shutterLongPressTriggered = false
     @State private var frameStartPending = false
     @State private var resultMenuExpanded = false
@@ -2144,6 +2119,7 @@ struct ContentView: View {
             comparingResult = false
             comparisonWipePosition = 0.5
             shutterMenuExpanded = false
+            previewActionExpanded = false
             resultMenuExpanded = false
             frameStartPending = false
             resultReplacementPending = false
@@ -2178,6 +2154,7 @@ struct ContentView: View {
                 showDragHint = false
                 lensDockExpanded = false
                 motionExportMenuExpanded = false
+                previewActionExpanded = false
                 cancelDollyZoom(reset: false)
                 resultMenuExpanded = false
                 generationStartedAt = Date()
@@ -2187,7 +2164,13 @@ struct ContentView: View {
             guard ready, app.inputImage != nil else {
                 lensDockExpanded = false
                 motionExportMenuExpanded = false
+                previewActionExpanded = false
                 cancelDollyZoom(reset: true)
+                return
+            }
+            if app.previewMode {
+                revealPreviewActionsAfterLoad()
+                revealDragHintAfterRendererReady()
                 return
             }
             revealShutterMenuAfterReconstruction()
@@ -2204,6 +2187,7 @@ struct ContentView: View {
             }
             showDragHint = false
             shutterMenuExpanded = false
+            previewActionExpanded = false
             lensDockExpanded = false
             motionExportMenuExpanded = false
             cancelDollyZoom(reset: false)
@@ -2557,7 +2541,7 @@ struct ContentView: View {
                     .zIndex(6)
             }
 
-            if lensDockExpanded, phase == .compose, app.rendererReady, app.resultImage == nil {
+            if lensDockExpanded, (phase == .compose || phase == .preview), app.rendererReady, app.resultImage == nil {
                 lensDock(width: floatingDockWidth, scale: scale)
                     .position(x: size.width / 2, y: floatingDockY)
                     .transition(.asymmetric(
@@ -2601,13 +2585,7 @@ struct ContentView: View {
         if phase == .result {
             resultActionRow(scale: scale)
         } else if phase == .preview {
-            Button {
-                openPhotoPickerForReplacement()
-            } label: {
-                emptyBottomAction(scale: scale)
-            }
-            .buttonStyle(FluidPressButtonStyle(pressedScale: 0.94))
-            .accessibilityLabel("放入照片")
+            previewActionRow(scale: scale)
         } else if phase == .failed {
             failedActionRow(scale: scale)
         } else if phase == .compose {
@@ -2814,11 +2792,67 @@ struct ContentView: View {
         showingSettings = true
     }
 
+    private func previewActionRow(scale: CGFloat) -> some View {
+        let controlsVisible = previewActionExpanded && app.rendererReady
+        return ZStack {
+            Button {
+                withAnimation(.spring(response: 0.30, dampingFraction: 0.84)) {
+                    lensDockExpanded.toggle()
+                    motionExportMenuExpanded = false
+                    showDragHint = false
+                }
+            } label: {
+                composeAuxiliaryButton(systemImage: "camera.aperture", title: "镜头", scale: scale)
+            }
+            .disabled(!app.rendererReady)
+            .offset(x: controlsVisible ? -88 * scale : 0, y: controlsVisible ? 0 : -2 * scale)
+            .scaleEffect(controlsVisible ? 1 : 0.24)
+            .opacity(controlsVisible ? 1 : 0)
+            .blur(radius: controlsVisible ? 0 : 5)
+            .allowsHitTesting(controlsVisible)
+            .buttonStyle(FluidPressButtonStyle(pressedScale: 0.94))
+            .accessibilityLabel(lensDockExpanded ? "收起镜头控制".localized : "打开镜头控制".localized)
+
+            Button {
+                openPhotoPickerForReplacement()
+            } label: {
+                emptyBottomAction(scale: scale)
+            }
+            .buttonStyle(FluidPressButtonStyle(pressedScale: 0.94))
+            .accessibilityLabel("放入照片")
+
+            Button {
+                withAnimation(.spring(response: 0.30, dampingFraction: 0.84)) {
+                    motionExportMenuExpanded.toggle()
+                    lensDockExpanded = false
+                    showDragHint = false
+                }
+            } label: {
+                composeAuxiliaryButton(systemImage: "square.and.arrow.up", title: "导出", scale: scale)
+            }
+            .disabled(!app.rendererReady)
+            .offset(x: controlsVisible ? 88 * scale : 0, y: controlsVisible ? 0 : -2 * scale)
+            .scaleEffect(controlsVisible ? 1 : 0.24)
+            .opacity(controlsVisible ? 1 : 0)
+            .blur(radius: controlsVisible ? 0 : 5)
+            .allowsHitTesting(controlsVisible)
+            .buttonStyle(FluidPressButtonStyle(pressedScale: 0.94))
+            .accessibilityLabel(motionExportMenuExpanded ? "收起动效导出".localized : "打开动效导出".localized)
+        }
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .padding(.horizontal, 42 * scale)
+        .onAppear {
+            revealPreviewActionsAfterLoad()
+        }
+    }
+
     private func openCachedGalleryItem(_ item: ReshotCacheItem) {
         frameStartPending = false
         resultReplacementPending = false
         resultMenuExpanded = false
         shutterMenuExpanded = false
+        previewActionExpanded = false
         lensDockExpanded = false
         motionExportMenuExpanded = false
         showDragHint = false
@@ -2940,6 +2974,17 @@ struct ContentView: View {
         frameStartPending = false
         withAnimation(.spring(response: 0.46, dampingFraction: 0.70, blendDuration: 0.06)) {
             shutterMenuExpanded = true
+        }
+    }
+
+    private func revealPreviewActionsAfterLoad() {
+        guard app.previewMode, app.inputImage != nil, app.rendererReady, app.resultImage == nil, !app.reconstructingFrame else { return }
+        previewActionExpanded = false
+        DispatchQueue.main.async {
+            guard app.previewMode, app.inputImage != nil, app.rendererReady, app.resultImage == nil, !app.reconstructingFrame else { return }
+            withAnimation(.spring(response: 0.46, dampingFraction: 0.70, blendDuration: 0.06)) {
+                previewActionExpanded = true
+            }
         }
     }
 
@@ -4872,10 +4917,11 @@ struct SettingsView: View {
                         }
                     } label: {
                         Text("如何获取 API Key?")
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .font(.system(size: 12, weight: .regular, design: .rounded))
                             .tracking(0.3)
-                            .foregroundStyle(SettingsSheetStyle.accent)
+                            .foregroundStyle(SettingsSheetStyle.tertiaryText)
                             .padding(.leading, 2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .buttonStyle(.plain)
                 }

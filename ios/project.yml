@@ -39,7 +39,7 @@ targets:
       path: OpenReshot/Info.plist
       properties:
         CFBundleShortVersionString: "1.0"
-        CFBundleVersion: "5"
+        CFBundleVersion: "7"
         CFBundleDisplayName: Reshot
         NSPhotoLibraryUsageDescription: "Pick a photo to turn into a 3D parallax view."
         NSPhotoLibraryAddUsageDescription: "Save reconstructed photos, motion videos, GIFs, and Live Photos to your library."

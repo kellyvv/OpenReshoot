@@ -71,8 +71,6 @@
 "文件写入失败：%@" = "File write failed: %@";
 "无效响应" = "Invalid response";
 "显示成片" = "Show result";
-"朋友圈" = "Moments";
-"朋友圈 Live 已保存" = "Moments Live saved";
 "本机模型已就绪" = "Local model is ready";
 "构建失败,请检查模型或重试" = "Build failed. Check the model or retry.";
 "构建空间" = "Building Space";
