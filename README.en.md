@@ -51,6 +51,7 @@ After WWDC 2026, spatial photos and angle-aware photo viewing became one of the 
 **2026-06-16**
 
 - A new Reshot TestFlight build has been uploaded: **1.0 (9)**.
+- TestFlight beta link: [https://testflight.apple.com/join/8XV5rFkf](https://testflight.apple.com/join/8XV5rFkf).
 - The current deployment target is iOS 18.0, so iPhone XR / XS / SE 2 and newer can theoretically install the app, and low-memory phones can run the model.
 - For the best experience, iPhone 14 Pro and newer, all iPhone 15 / 16 / 17 models, and iPhone Air are still recommended.
 - Model inference and on-device Core ML compilation are memory-intensive, so lower-memory devices may run slower or get warmer.
@@ -70,7 +71,7 @@ After WWDC 2026, spatial photos and angle-aware photo viewing became one of the 
 ### 2026-06-12
 
 - OpenReshot has been submitted to Apple TestFlight beta review and is currently waiting for Apple processing.
-- TestFlight review usually takes about 1-2 days; the TestFlight invite link will be added here after approval.
+- TestFlight invite link: [https://testflight.apple.com/join/8XV5rFkf](https://testflight.apple.com/join/8XV5rFkf).
 - Future installs and testing will go through TestFlight directly, without manually building to a device from Xcode.
 
 ### 2026-06-11

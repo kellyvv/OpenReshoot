@@ -51,6 +51,7 @@ WWDC 2026 之后，空间照片和可变视角照片成为 iOS 27 时代很有�
 **2026-06-16**
 
 - Reshot 新 TestFlight build 已上传：**1.0 (9)**。
+- TestFlight 体验链接：[https://testflight.apple.com/join/8XV5rFkf](https://testflight.apple.com/join/8XV5rFkf)。
 - 当前工程最低系统是 iOS 18.0，理论上 iPhone XR / XS / SE 2 及以后机型都可以安装，低内存手机也可以运行模型。
 - 实际体验仍推荐 iPhone 14 Pro 及以后、iPhone 15 / 16 / 17 全系、iPhone Air。
 - 模型推理和本机编译比较吃内存，低内存设备可能会更慢或更容易发热。
@@ -70,7 +71,7 @@ WWDC 2026 之后，空间照片和可变视角照片成为 iOS 27 时代很有�
 ### 2026-06-12
 
 - OpenReshot 已提交 Apple TestFlight 审核，当前等待 Apple 处理。
-- TestFlight 审核通常需要 1-2 天；通过后会在这里补充 TestFlight 邀请链接。
+- TestFlight 邀请链接：[https://testflight.apple.com/join/8XV5rFkf](https://testflight.apple.com/join/8XV5rFkf)。
 - 后续体验会直接通过 TestFlight 安装，不需要再手动用 Xcode 打包到手机。
 
 ### 2026-06-11
