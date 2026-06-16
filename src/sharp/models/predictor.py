@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 
 import torch
+import torch.nn.functional as F
 from torch import nn
 
 from sharp.models.monodepth import MonodepthWithEncodingAdaptor
@@ -178,6 +179,13 @@ class RGBGaussianPredictor(nn.Module):
             depth,
             monodepth_output.decoder_features,
         )
+        if monodepth.shape[-2:] != image.shape[-2:]:
+            monodepth = F.interpolate(
+                monodepth,
+                size=image.shape[-2:],
+                mode="bilinear",
+                align_corners=False,
+            )
 
         init_output = self.init_model(image, monodepth)
         image_features = self.feature_model(

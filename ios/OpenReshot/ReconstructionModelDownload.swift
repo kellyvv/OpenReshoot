@@ -93,6 +93,10 @@ final class ReconstructionModelStore: ObservableObject {
         Self.activeModelURL()
     }
 
+    nonisolated func activeModelURL(selection: OpenReshotModelSelection) -> URL? {
+        Self.activeModelURL(selection: selection)
+    }
+
     @MainActor
     func refreshInstallState() {
         installState = Self.currentInstallState()
@@ -189,24 +193,61 @@ final class ReconstructionModelStore: ObservableObject {
     }
 
     nonisolated static func activeModelURL() -> URL? {
+        if !OpenReshotDebugFlags.preferDownloadedModel {
+            if let defaultBundledModelURL {
+                return defaultBundledModelURL
+            }
+            if let bundledModelURL {
+                return bundledModelURL
+            }
+        }
         if FileManager.default.fileExists(atPath: downloadedModelURL.path) {
             return downloadedModelURL
         }
-        return bundledModelURL
+        return defaultBundledModelURL ?? bundledModelURL
+    }
+
+    nonisolated static func activeModelURL(selection: OpenReshotModelSelection) -> URL? {
+        switch selection {
+        case .automatic:
+            return activeModelURL()
+        case .downloaded:
+            return FileManager.default.fileExists(atPath: downloadedModelURL.path) ? downloadedModelURL : nil
+        case .bundled1536, .bundled1280, .bundled1024, .bundled896, .bundled768, .bundledInt4, .bundledPalettize4:
+            guard let resourceName = selection.bundledResourceName else { return nil }
+            return bundledModelURL(resourceName: resourceName)
+        }
     }
 
     nonisolated private static func currentInstallState() -> ReconstructionModelInstallState {
+        let bundledURL = defaultBundledModelURL ?? bundledModelURL
+        if bundledURL != nil, !OpenReshotDebugFlags.preferDownloadedModel {
+            return .bundled
+        }
         if FileManager.default.fileExists(atPath: downloadedModelURL.path) {
             return .downloaded
         }
-        if bundledModelURL != nil {
+        if bundledURL != nil {
             return .bundled
         }
         return .notInstalled
     }
 
     nonisolated static var bundledModelURL: URL? {
-        Bundle.main.url(forResource: "SHARP", withExtension: "mlmodelc")
+        bundledModelURL(resourceName: "SHARP")
+    }
+
+    nonisolated static var defaultBundledModelURL: URL? {
+        for resourceName in ["SHARP-sdpa-768", "SHARP-sdpa-896", "SHARP-sdpa-1024"] {
+            if let url = bundledModelURL(resourceName: resourceName) {
+                return url
+            }
+        }
+        return nil
+    }
+
+    nonisolated static func bundledModelURL(resourceName: String) -> URL? {
+        Bundle.main.url(forResource: resourceName, withExtension: "mlmodelc")
     }
 
     nonisolated static var downloadedModelURL: URL {

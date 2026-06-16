@@ -35,9 +35,9 @@ def robust_where(
     input_1 = input
     input_2 = input
     if branch_true_safe_value is not None:
-        input_1 = torch.where(condition, input_1, branch_true_safe_value)
+        input_1 = torch.where(condition, input_1, torch.full_like(input_1, branch_true_safe_value))
     if branch_false_safe_value is not None:
-        input_2 = torch.where(~condition, input_2, branch_false_safe_value)
+        input_2 = torch.where(~condition, input_2, torch.full_like(input_2, branch_false_safe_value))
     return torch.where(
         condition,
         branch_true_func(input_1),

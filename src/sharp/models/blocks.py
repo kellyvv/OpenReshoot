@@ -10,6 +10,7 @@ from typing import Literal
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 
 NormLayerName = Literal["noop", "batch_norm", "group_norm", "instance_norm"]
 UpsamplingMode = Literal["transposed_conv", "nearest", "bilinear"]
@@ -175,6 +176,8 @@ class FeatureFusionBlock2d(nn.Module):
 
         if x1 is not None:
             res = self.resnet1(x1)
+            if res.shape[-2:] != x.shape[-2:]:
+                res = F.interpolate(res, size=x.shape[-2:], mode="bilinear", align_corners=False)
             x = self.skip_add.add(x, res)
 
         x = self.resnet2(x)

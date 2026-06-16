@@ -12,6 +12,7 @@ from typing import NamedTuple
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from sharp.models.blocks import (
     FeatureFusionBlock2d,
@@ -251,6 +252,13 @@ class GaussianDensePredictionTransformer(nn.Module):
             skip_features = self.image_encoder(input_features).texture_features
         else:
             skip_features = self.image_encoder(input_features[:, :3].contiguous())
+        if features.shape[-2:] != skip_features.shape[-2:]:
+            features = F.interpolate(
+                features,
+                size=skip_features.shape[-2:],
+                mode="bilinear",
+                align_corners=False,
+            )
         features = self.fusion(features, skip_features)
 
         texture_features = self.texture_head(features)

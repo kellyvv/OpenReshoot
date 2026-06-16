@@ -1,6 +1,7 @@
 """Render PyTorch vs Core ML gaussians and compare — the decisive parity test."""
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import numpy as np
@@ -15,10 +16,23 @@ from sharp.utils.gaussians import Gaussians3D, unproject_gaussians
 from sharp.utils.mps_renderer import MPSGaussianRenderer
 
 ROOT = Path(__file__).resolve().parents[1]
-W = 1536
+DEFAULT_WIDTH = 1536
 dev = torch.device("mps")
 
-img, _, f_px = sio.load_rgb(ROOT / "out" / "koala.png")
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--mlpackage", type=Path, default=ROOT / "out" / "SHARP-sdpa.mlpackage")
+    parser.add_argument("--image", type=Path, default=ROOT / "out" / "koala.png")
+    parser.add_argument("--output", type=Path, default=ROOT / "out" / "coreml_parity.png")
+    parser.add_argument("--width", type=int, default=DEFAULT_WIDTH)
+    return parser.parse_args()
+
+
+args = parse_args()
+W = args.width
+
+img, _, f_px = sio.load_rgb(args.image)
 H0, W0 = img.shape[:2]
 x = torch.from_numpy(img.copy()).float().permute(2, 0, 1) / 255.0
 x = F.interpolate(x[None], size=(W, W), mode="bilinear", align_corners=True)
@@ -44,7 +58,7 @@ with torch.no_grad():
 g_pt = unproj(g_pt)
 
 # --- Core ML -> assemble Gaussians3D ---
-ml = ct.models.MLModel(str(ROOT / "out" / "SHARP.mlpackage"))
+ml = ct.models.MLModel(str(args.mlpackage))
 out = ml.predict({"image": x.numpy().astype(np.float32), "disparity_factor": disp.numpy().astype(np.float32)})
 sn = [o.name for o in ml._spec.description.output]
 t = lambda i: torch.from_numpy(np.array(out[sn[i]]).astype(np.float32))
@@ -70,5 +84,6 @@ mse = float(((a - b) ** 2).mean())
 psnr = 10 * np.log10(1.0 / max(mse, 1e-12))
 print(f"\nrender PSNR (PyTorch vs Core ML): {psnr:.2f} dB  (higher=identical; >35 = visually indistinguishable)")
 sbs = (np.concatenate([a, b], axis=1) * 255).astype(np.uint8)
-Image.fromarray(sbs).save(ROOT / "out" / "coreml_parity.png")
-print("saved out/coreml_parity.png (left=PyTorch, right=Core ML)")
+args.output.parent.mkdir(parents=True, exist_ok=True)
+Image.fromarray(sbs).save(args.output)
+print(f"saved {args.output} (left=PyTorch, right=Core ML)")

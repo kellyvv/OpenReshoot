@@ -198,7 +198,14 @@ class SlidingPyramidNetwork(BaseEncoder):
         x1 = F.interpolate(x, size=None, scale_factor=0.5, mode="bilinear", align_corners=False)
 
         # Low resolution: 384 by default, corresponding to the backbone resolution.
-        x2 = F.interpolate(x, size=None, scale_factor=0.25, mode="bilinear", align_corners=False)
+        # Keep this level at the ViT resolution so conversion-time lower input sizes
+        # can still concatenate pyramid patches with the fixed 384px backbone input.
+        x2 = F.interpolate(
+            x,
+            size=(self.patch_size, self.patch_size),
+            mode="bilinear",
+            align_corners=False,
+        )
 
         return x0, x1, x2
 
@@ -322,6 +329,10 @@ def split(image: torch.Tensor, overlap_ratio: float = 0.25, patch_size: int = 38
 
     image_size = image.shape[-1]
     steps = int(math.ceil((image_size - patch_size) / patch_stride)) + 1
+    last_end = (steps - 1) * patch_stride + patch_size
+    pad = max(0, last_end - image_size)
+    if pad:
+        image = F.pad(image, (0, pad, 0, pad), mode="replicate")
 
     x_patch_list = []
     for j in range(steps):
@@ -333,6 +344,8 @@ def split(image: torch.Tensor, overlap_ratio: float = 0.25, patch_size: int = 38
             i1 = i0 + patch_size
             x_patch_list.append(image[..., j0:j1, i0:i1])
 
+    if len(x_patch_list) == 1:
+        return x_patch_list[0]
     return torch.cat(x_patch_list, dim=0)
 
 
@@ -363,7 +376,7 @@ def merge(image_patches: torch.Tensor, batch_size: int, padding: int = 3) -> tor
             output_row_list.append(output)
             idx += 1
 
-        output_row = torch.cat(output_row_list, dim=-1)
+        output_row = output_row_list[0] if len(output_row_list) == 1 else torch.cat(output_row_list, dim=-1)
         output_list.append(output_row)
-    output = torch.cat(output_list, dim=-2)
+    output = output_list[0] if len(output_list) == 1 else torch.cat(output_list, dim=-2)
     return output

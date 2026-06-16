@@ -52,10 +52,85 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
         var blurScale: Float
     }
 
+    private final class SortCompletionSignal: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Void, Never>?
+        private var didSignal = false
+
+        func signal() {
+            lock.lock()
+            didSignal = true
+            let pending = continuation
+            continuation = nil
+            lock.unlock()
+            pending?.resume()
+        }
+
+        func wait() async {
+            await withCheckedContinuation { continuation in
+                lock.lock()
+                if didSignal {
+                    lock.unlock()
+                    continuation.resume()
+                } else {
+                    self.continuation = continuation
+                    lock.unlock()
+                }
+            }
+        }
+    }
+
+    nonisolated private static func makeSingleChunk(
+        from url: URL,
+        expectedSplatCount: Int?,
+        device: MTLDevice
+    ) async throws -> (chunk: SplatChunk, splatCount: Int) {
+        OpenReshotMemoryProbe.log("renderer makeSingleChunk start")
+        let reader = try AutodetectSceneReader(url)
+        let initialCapacity = max(expectedSplatCount ?? 1, 1)
+        let splatBuffer = try MetalBuffer<EncodedSplatPoint>(device: device, capacity: initialCapacity)
+        OpenReshotMemoryProbe.log("renderer makeSingleChunk buffer allocated")
+        var splatCount = 0
+        var sphericalHarmonicPoints: [SplatPoint]?
+
+        for try await batch in try await reader.read() {
+            if Task.isCancelled { throw CancellationError() }
+            guard !batch.isEmpty else { continue }
+            if sphericalHarmonicPoints != nil {
+                sphericalHarmonicPoints?.append(contentsOf: batch)
+                continue
+            }
+            let shDegree = batch.first?.color.shDegree ?? .sh0
+            if shDegree > .sh0 {
+                sphericalHarmonicPoints = []
+                sphericalHarmonicPoints?.reserveCapacity(expectedSplatCount ?? batch.count)
+                sphericalHarmonicPoints?.append(contentsOf: batch)
+                continue
+            }
+            try splatBuffer.ensureCapacity(splatCount + batch.count)
+            for point in batch {
+                splatBuffer.values[splatCount] = EncodedSplatPoint(point)
+                splatCount += 1
+            }
+        }
+
+        if let sphericalHarmonicPoints {
+            OpenReshotMemoryProbe.log("renderer makeSingleChunk SH fallback before chunk")
+            return (try SplatChunk(device: device, from: sphericalHarmonicPoints), sphericalHarmonicPoints.count)
+        }
+        guard splatCount > 0 else {
+            throw err("empty splat scene")
+        }
+        splatBuffer.count = splatCount
+        OpenReshotMemoryProbe.log("renderer makeSingleChunk finished")
+        return (SplatChunk(splats: splatBuffer, shDegree: .sh0), splatCount)
+    }
+
     init?(_ v: MTKView) {
         guard let dev = MTLCreateSystemDefaultDevice(), let q = dev.makeCommandQueue() else { return nil }
         device = dev; queue = q; view = v
         super.init()
+        OpenReshotDiagnostics.logMetalDevice(dev)
         v.device = dev
         v.isOpaque = false
         v.backgroundColor = .clear
@@ -75,6 +150,7 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
     }
 
     func clearCloud() {
+        OpenReshotMemoryProbe.log("renderer clearCloud start")
         cloudTask?.cancel()
         cloudTaskID = UUID()
         stopSmoothing()
@@ -86,78 +162,19 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
         depthTarget = nil
         renderTargetSize = MTLSize(width: 0, height: 0, depth: 1)
         view?.setNeedsDisplay()
+        OpenReshotMemoryProbe.log("renderer clearCloud end")
     }
 
-    /// Build a MetalSplatter renderer from the reconstructed points (async: chunk + first sort).
+    /// Build a MetalSplatter renderer from a PLY scene file without materializing all points at once.
     @discardableResult
-    func setCloud(_ points: [SplatPoint], focus: Float, fpx: Float, width: Int, height: Int) -> Bool {
+    func setCloud(from url: URL, expectedSplatCount: Int? = nil, focus: Float, fpx: Float, width: Int, height: Int) -> Bool {
         self.fpx = fpx; imgW = Float(width); imgH = Float(height); self.focus = focus
         lensFocusDepth = focus
         lensFNumber = 16
         lensDolly = 0
         refreshMotionAmplitude()
-        print("🎛️ [OpenReshot] motion amplitude x=\(amplitude.x), y=\(amplitude.y), focus=\(focus)")
-        guard let view else { return false }
-        let cf = view.colorPixelFormat, sc = view.sampleCount
-        cloudTask?.cancel()
-        let taskID = UUID()
-        cloudTaskID = taskID
-        stopSmoothing()
-        tilt = .zero
-        targetTilt = .zero
-        readyNotified = false
-        splat = nil
-
-        let metalDevice = device
-        cloudTask = Task.detached(priority: .userInitiated) { [weak self, points] in
-            do {
-                let r = try SplatRenderer(device: metalDevice, colorFormat: cf, depthFormat: Self.splatDepthFormat,
-                                          sampleCount: sc, maxViewCount: 1,
-                                          maxSimultaneousRenders: Self.maxSimultaneousRenders,
-                                          highQualityDepth: false)
-                r.onSortComplete = { [weak self] _ in
-                    Task { @MainActor in
-                        guard let self else { return }
-                        guard self.cloudTaskID == taskID else { return }
-                        if self.displayLink == nil {
-                            self.view?.setNeedsDisplay()
-                        }
-                        if !self.readyNotified {
-                            self.readyNotified = true
-                            self.onReady?()
-                        }
-                    }
-                }
-                let chunk = try SplatChunk(device: metalDevice, from: points)
-                if Task.isCancelled { return }
-                await r.addChunk(chunk)
-                if Task.isCancelled { return }
-                await MainActor.run { [weak self] in
-                    guard let self, self.cloudTaskID == taskID else { return }
-                    self.splat = r
-                    self.view?.setNeedsDisplay()
-                    print("✅ [OpenReshot] MetalSplatter ready, \(r.splatCount) splats")
-                }
-            } catch {
-                await MainActor.run { [weak self] in
-                    print("❌ [OpenReshot] MetalSplatter setup failed: \(error)")
-                    guard let self, self.cloudTaskID == taskID else { return }
-                    self.onFailure?(error.localizedDescription)
-                }
-            }
-        }
-        return true
-    }
-
-    /// Build a MetalSplatter renderer from a bundled splat scene without running reconstruction.
-    @discardableResult
-    func setCloud(from url: URL, focus: Float, fpx: Float, width: Int, height: Int) -> Bool {
-        self.fpx = fpx; imgW = Float(width); imgH = Float(height); self.focus = focus
-        lensFocusDepth = focus
-        lensFNumber = 16
-        lensDolly = 0
-        refreshMotionAmplitude()
-        print("🎛️ [OpenReshot] demo motion amplitude x=\(amplitude.x), y=\(amplitude.y), focus=\(focus)")
+        print("🎛️ [OpenReshot] scene motion amplitude x=\(amplitude.x), y=\(amplitude.y), focus=\(focus)")
+        OpenReshotMemoryProbe.log("renderer setCloud start")
         guard let view else { return false }
         let cf = view.colorPixelFormat, sc = view.sampleCount
         cloudTask?.cancel()
@@ -172,10 +189,12 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
         let metalDevice = device
         cloudTask = Task.detached(priority: .userInitiated) { [weak self, url] in
             do {
+                OpenReshotMemoryProbe.log("renderer task before SplatRenderer init")
                 let r = try SplatRenderer(device: metalDevice, colorFormat: cf, depthFormat: Self.splatDepthFormat,
                                           sampleCount: sc, maxViewCount: 1,
                                           maxSimultaneousRenders: Self.maxSimultaneousRenders,
                                           highQualityDepth: false)
+                OpenReshotMemoryProbe.log("renderer task after SplatRenderer init")
                 r.onSortComplete = { [weak self] _ in
                     Task { @MainActor in
                         guard let self else { return }
@@ -183,25 +202,44 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
                         if self.displayLink == nil {
                             self.view?.setNeedsDisplay()
                         }
-                        if !self.readyNotified {
-                            self.readyNotified = true
-                            self.onReady?()
-                        }
                     }
                 }
-                let reader = try AutodetectSceneReader(url)
-                let points = try await reader.readAll()
+                OpenReshotMemoryProbe.log("renderer task before chunk build")
+                let chunkResult = try await Self.makeSingleChunk(
+                    from: url,
+                    expectedSplatCount: expectedSplatCount,
+                    device: metalDevice
+                )
+                OpenReshotMemoryProbe.log("renderer task after chunk build")
                 if Task.isCancelled { return }
-                let chunk = try SplatChunk(device: metalDevice, from: points)
+                let sortSignal = SortCompletionSignal()
+                r.afterNextSort {
+                    sortSignal.signal()
+                }
+
+                OpenReshotMemoryProbe.log("renderer task before addChunk")
+                let chunkID = await r.addChunk(chunkResult.chunk, enabled: false)
+                OpenReshotMemoryProbe.log("renderer task after addChunk")
+                await sortSignal.wait()
+                OpenReshotMemoryProbe.log("renderer task after first sort")
                 if Task.isCancelled { return }
-                await r.addChunk(chunk)
+                await r.setChunkEnabled(chunkID, enabled: true)
+                OpenReshotMemoryProbe.log("renderer task after enable chunk")
                 if Task.isCancelled { return }
+                let finalLoadedCount = chunkResult.splatCount
                 await MainActor.run { [weak self] in
                     guard let self, self.cloudTaskID == taskID else { return }
                     self.splat = r
                     self.view?.setNeedsDisplay()
-                    print("✅ [OpenReshot] bundled demo ready, \(r.splatCount) splats")
+                    if !self.readyNotified {
+                        self.readyNotified = true
+                        self.onReady?()
+                    }
+                    OpenReshotMemoryProbe.log("renderer ready assigned")
+                    print("✅ [OpenReshot] splat scene ready, \(finalLoadedCount) splats in 1 chunk")
                 }
+            } catch is CancellationError {
+                return
             } catch {
                 await MainActor.run { [weak self] in
                     print("❌ [OpenReshot] bundled demo setup failed: \(error)")
@@ -513,6 +551,10 @@ final class ReshootRenderer: NSObject, MTKViewDelegate {
         guard renderTargetSize.width != width ||
               renderTargetSize.height != height ||
               colorTarget?.pixelFormat != colorFormat else { return }
+
+        if let view {
+            OpenReshotDiagnostics.logMetalView(label: "render target \(width)x\(height)", renderScale: CGFloat(view.contentScaleFactor), frameRate: view.preferredFramesPerSecond, view: view)
+        }
 
         let colorDescriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: colorFormat,

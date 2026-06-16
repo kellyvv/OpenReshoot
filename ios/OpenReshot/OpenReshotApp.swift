@@ -13,6 +13,7 @@ import Vision
 import simd
 import SplatIO
 import CryptoKit
+import Darwin
 
 extension String {
     var localized: String {
@@ -26,6 +27,470 @@ extension String {
 
 private func localizedSpaceCount(_ count: Int) -> String {
     String.localizedStringWithFormat(NSLocalizedString("%ld 个空间", comment: ""), count)
+}
+
+enum OpenReshotMemoryTestProfile: String, CaseIterable, Identifiable {
+    case normal
+    case cpu
+    case cpuNoBackings
+    case gpu
+    case cpuAndNeuralEngine
+
+    static let defaultsKey = "OpenReshot.memoryTestProfile"
+    static let allCases: [OpenReshotMemoryTestProfile] = [.normal, .cpu, .cpuNoBackings, .gpu]
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .normal: return "标准"
+        case .cpu: return "纯推理 CPU"
+        case .cpuNoBackings: return "CPU 无 Backings"
+        case .gpu: return "纯推理 GPU"
+        case .cpuAndNeuralEngine: return "纯推理 CPU+ANE"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .normal:
+            return "默认安全配置,关闭 outputBackings"
+        case .cpu:
+            return "跳过缓存、渲染、主体保护,开启 outputBackings 对照"
+        case .cpuNoBackings:
+            return "跳过缓存、渲染、主体保护,关闭 outputBackings"
+        case .gpu:
+            return "同纯推理档,使用 CPU+GPU 对照"
+        case .cpuAndNeuralEngine:
+            return "同纯推理档,使用 CPU+Neural Engine"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .normal: return "camera.viewfinder"
+        case .cpu: return "cpu"
+        case .cpuNoBackings: return "rectangle.slash"
+        case .gpu: return "circle.grid.cross"
+        case .cpuAndNeuralEngine: return "brain"
+        }
+    }
+
+    var backend: SharpComputeBackend? {
+        switch self {
+        case .normal:
+            return nil
+        case .cpu, .cpuNoBackings:
+            return .cpuOnly
+        case .gpu:
+            return .cpuAndGPU
+        case .cpuAndNeuralEngine:
+            return .cpuAndNeuralEngine
+        }
+    }
+
+    var disablesPipelineSideEffects: Bool {
+        self != .normal
+    }
+
+    var disablesOutputBackings: Bool {
+        self == .cpuNoBackings
+    }
+
+    static var saved: OpenReshotMemoryTestProfile {
+        get {
+            guard let rawValue = UserDefaults.standard.string(forKey: defaultsKey),
+                  let profile = OpenReshotMemoryTestProfile(rawValue: rawValue) else {
+                return .normal
+            }
+            return profile
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: defaultsKey)
+        }
+    }
+}
+
+enum OpenReshotModelSelection: String, CaseIterable, Identifiable {
+    case automatic
+    case bundled1536
+    case bundled1280
+    case bundled1024
+    case bundled896
+    case bundled768
+    case bundledInt4
+    case bundledPalettize4
+    case downloaded
+
+    static let defaultsKey = "OpenReshot.modelSelection"
+    static let allCases: [OpenReshotModelSelection] = [.automatic, .bundled1536, .bundled1280, .bundled1024, .bundled896, .bundled768, .downloaded]
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .automatic: return "自动"
+        case .bundled1536: return "SHARP 1536"
+        case .bundled1280: return "SHARP 1280"
+        case .bundled1024: return "SHARP 1024"
+        case .bundled896: return "SHARP 896"
+        case .bundled768: return "SHARP 768"
+        case .bundledInt4: return "SHARP Int4"
+        case .bundledPalettize4: return "SHARP Pal4"
+        case .downloaded: return "已下载"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .automatic:
+            return "按固定顺序优先使用内置 1536 模型"
+        case .bundled1536:
+            return "内置 fp16 SHARP.mlpackage"
+        case .bundled1280:
+            return "内置 fp16 1280 分辨率包"
+        case .bundled1024:
+            return "内置 fp16 1024 分辨率包"
+        case .bundled896:
+            return "内置 fp16 896 分辨率候选包"
+        case .bundled768:
+            return "内置 fp16 768 分辨率候选包"
+        case .bundledInt4:
+            return "内置 int4 权重量化包"
+        case .bundledPalettize4:
+            return "内置 4-bit palettize 权重量化包"
+        case .downloaded:
+            return "Application Support 里的下载模型"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .automatic: return "wand.and.stars"
+        case .bundled1536: return "shippingbox"
+        case .bundled1280: return "rectangle.compress.vertical"
+        case .bundled1024: return "rectangle.compress.vertical"
+        case .bundled896: return "rectangle.compress.vertical"
+        case .bundled768: return "rectangle.compress.vertical"
+        case .bundledInt4: return "square.grid.3x3.square"
+        case .bundledPalettize4: return "circle.hexagongrid"
+        case .downloaded: return "arrow.down.circle"
+        }
+    }
+
+    var bundledResourceName: String? {
+        switch self {
+        case .automatic, .downloaded:
+            return nil
+        case .bundled1536:
+            return "SHARP"
+        case .bundled1280:
+            return "SHARP-sdpa-1280"
+        case .bundled1024:
+            return "SHARP-sdpa-1024"
+        case .bundled896:
+            return "SHARP-sdpa-896"
+        case .bundled768:
+            return "SHARP-sdpa-768"
+        case .bundledInt4:
+            return "SHARP-sdpa-int4"
+        case .bundledPalettize4:
+            return "SHARP-sdpa-palettize4"
+        }
+    }
+
+    var usesQuantizedWeights: Bool {
+        switch self {
+        case .bundledInt4, .bundledPalettize4:
+            return true
+        case .automatic, .bundled1536, .bundled1280, .bundled1024, .bundled896, .bundled768, .downloaded:
+            return false
+        }
+    }
+
+    static var saved: OpenReshotModelSelection {
+        get {
+            guard let rawValue = UserDefaults.standard.string(forKey: defaultsKey),
+                  let selection = OpenReshotModelSelection(rawValue: rawValue) else {
+                return .automatic
+            }
+            if selection.usesQuantizedWeights || !Self.allCases.contains(selection) {
+                return .automatic
+            }
+            return selection
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: defaultsKey)
+        }
+    }
+}
+
+enum OpenReshotDebugFlags {
+    private static let arguments = Set(ProcessInfo.processInfo.arguments)
+    private static let runtimeOverrideLock = NSLock()
+    private static var runtimeMemoryTestProfile: OpenReshotMemoryTestProfile?
+
+    static var memoryTestProfile: OpenReshotMemoryTestProfile {
+        runtimeOverrideLock.lock()
+        let override = runtimeMemoryTestProfile
+        runtimeOverrideLock.unlock()
+        return override ?? .normal
+    }
+
+    static var noCache: Bool {
+        arguments.contains("-openreshotNoCache") || memoryTestProfile.disablesPipelineSideEffects
+    }
+
+    static var noRenderer: Bool {
+        arguments.contains("-openreshotNoRenderer") || memoryTestProfile.disablesPipelineSideEffects
+    }
+
+    static var noSubjectMask: Bool {
+        arguments.contains("-openreshotNoSubjectMask") || memoryTestProfile.disablesPipelineSideEffects
+    }
+
+    static var keepModelCache: Bool {
+        arguments.contains("-openreshotKeepModelCache")
+    }
+
+    static var releaseModelBeforeRenderer: Bool {
+        arguments.contains("-openreshotReleaseModelBeforeRenderer")
+    }
+
+    static var cpuOnlyInference: Bool {
+        arguments.contains("-openreshotCPUOnlyInference") || memoryTestProfile.backend == .cpuOnly
+    }
+
+    static var fastGPUInference: Bool {
+        arguments.contains("-openreshotFastGPUInference") || memoryTestProfile.backend == .cpuAndGPU
+    }
+
+    static var cpuAndNeuralEngineInference: Bool {
+        arguments.contains("-openreshotCPUAndNeuralEngine") || memoryTestProfile.backend == .cpuAndNeuralEngine
+    }
+
+    static var allComputeUnitsInference: Bool {
+        arguments.contains("-openreshotAllComputeUnits") || memoryTestProfile.backend == .all
+    }
+
+    static var noOutputBackings: Bool {
+        arguments.contains("-openreshotNoOutputBackings") || memoryTestProfile.disablesOutputBackings || !useOutputBackings
+    }
+
+    static var useOutputBackings: Bool {
+        arguments.contains("-openreshotUseOutputBackings") ||
+        memoryTestProfile == .cpu ||
+        memoryTestProfile == .gpu
+    }
+
+    static var frequentReshape: Bool {
+        arguments.contains("-openreshotFrequentReshape")
+    }
+
+    static var preferBundledModel: Bool {
+        arguments.contains("-openreshotPreferBundledModel")
+    }
+
+    static var preferDownloadedModel: Bool {
+        arguments.contains("-openreshotPreferDownloadedModel")
+    }
+
+    static var memoryLogsEnabled: Bool {
+        !arguments.contains("-openreshotNoMemoryLog")
+    }
+
+    static func logActiveFlags() {
+        let activeFlags = [
+            memoryTestProfile == .normal ? nil : "profile=\(memoryTestProfile.rawValue)",
+            noCache ? "-openreshotNoCache" : nil,
+            noRenderer ? "-openreshotNoRenderer" : nil,
+            noSubjectMask ? "-openreshotNoSubjectMask" : nil,
+            keepModelCache ? "-openreshotKeepModelCache" : nil,
+            releaseModelBeforeRenderer ? "-openreshotReleaseModelBeforeRenderer" : nil,
+            cpuOnlyInference ? "-openreshotCPUOnlyInference" : nil,
+            fastGPUInference ? "-openreshotFastGPUInference" : nil,
+            cpuAndNeuralEngineInference ? "-openreshotCPUAndNeuralEngine" : nil,
+            allComputeUnitsInference ? "-openreshotAllComputeUnits" : nil,
+            noOutputBackings ? "-openreshotNoOutputBackings" : nil,
+            useOutputBackings ? "-openreshotUseOutputBackings" : nil,
+            frequentReshape ? "-openreshotFrequentReshape" : nil,
+            preferBundledModel ? "-openreshotPreferBundledModel" : nil,
+            preferDownloadedModel ? "-openreshotPreferDownloadedModel" : nil,
+            memoryLogsEnabled ? nil : "-openreshotNoMemoryLog"
+        ].compactMap { $0 }
+        guard !activeFlags.isEmpty else { return }
+        print("🧪 [OpenReshot] debug flags: \(activeFlags.joined(separator: ", "))")
+    }
+
+    static func withMemoryTestProfile<T>(_ profile: OpenReshotMemoryTestProfile, _ work: () throws -> T) rethrows -> T {
+        runtimeOverrideLock.lock()
+        let previous = runtimeMemoryTestProfile
+        runtimeMemoryTestProfile = profile
+        runtimeOverrideLock.unlock()
+
+        defer {
+            runtimeOverrideLock.lock()
+            runtimeMemoryTestProfile = previous
+            runtimeOverrideLock.unlock()
+        }
+
+        return try work()
+    }
+}
+
+enum OpenReshotMemoryProbe {
+    struct Snapshot {
+        let resident: UInt64
+        let residentPeak: UInt64
+        let physicalFootprint: UInt64
+        let physicalFootprintPeak: UInt64
+        let internalBytes: UInt64
+        let externalBytes: UInt64
+        let compressedBytes: UInt64
+    }
+
+    struct SampledPeak {
+        var sampleCount = 0
+        var resident = UInt64(0)
+        var residentPeak = UInt64(0)
+        var physicalFootprint = UInt64(0)
+        var physicalFootprintPeak = UInt64(0)
+        var internalBytes = UInt64(0)
+        var externalBytes = UInt64(0)
+        var compressedBytes = UInt64(0)
+
+        mutating func record(_ snapshot: Snapshot) {
+            sampleCount += 1
+            resident = max(resident, snapshot.resident)
+            residentPeak = max(residentPeak, snapshot.residentPeak)
+            physicalFootprint = max(physicalFootprint, snapshot.physicalFootprint)
+            physicalFootprintPeak = max(physicalFootprintPeak, snapshot.physicalFootprintPeak)
+            internalBytes = max(internalBytes, snapshot.internalBytes)
+            externalBytes = max(externalBytes, snapshot.externalBytes)
+            compressedBytes = max(compressedBytes, snapshot.compressedBytes)
+        }
+
+        var compactSummary: String {
+            "residentMax=\(OpenReshotMemoryProbe.format(resident)), " +
+            "footprintWindowMax=\(OpenReshotMemoryProbe.format(physicalFootprint)), " +
+            "internalMax=\(OpenReshotMemoryProbe.format(internalBytes)), " +
+            "externalMax=\(OpenReshotMemoryProbe.format(externalBytes)), " +
+            "compressedMax=\(OpenReshotMemoryProbe.format(compressedBytes))"
+        }
+    }
+
+    private static let sampledPeakLock = NSLock()
+    private static var sampledPeaksByPhase: [String: SampledPeak] = [:]
+
+    static func log(_ phase: String) {
+        guard OpenReshotDebugFlags.memoryLogsEnabled else { return }
+        guard let snapshot = snapshot else {
+            print("🧠 [OpenReshot] \(phase): memory unavailable")
+            return
+        }
+        print(
+            "🧠 [OpenReshot] \(phase): resident=\(format(snapshot.resident)), " +
+            "residentPeak=\(format(snapshot.residentPeak)), " +
+            "footprint=\(format(snapshot.physicalFootprint)), " +
+            "footprintPeak=\(format(snapshot.physicalFootprintPeak)), " +
+            "internal=\(format(snapshot.internalBytes)), " +
+            "external=\(format(snapshot.externalBytes)), " +
+            "compressed=\(format(snapshot.compressedBytes))"
+        )
+    }
+
+    static func measure<T>(_ phase: String, intervalNanoseconds: UInt64 = 100_000_000, _ work: () throws -> T) rethrows -> T {
+        guard OpenReshotDebugFlags.memoryLogsEnabled else {
+            return try work()
+        }
+
+        let start = Date()
+        let queue = DispatchQueue(label: "OpenReshot.memorySampler.\(phase)")
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        var peak = SampledPeak()
+
+        queue.sync {
+            if let snapshot {
+                peak.record(snapshot)
+            }
+        }
+        timer.schedule(deadline: .now() + .nanoseconds(Int(intervalNanoseconds)), repeating: .nanoseconds(Int(intervalNanoseconds)))
+        timer.setEventHandler {
+            if let snapshot {
+                peak.record(snapshot)
+            }
+        }
+        timer.resume()
+
+        defer {
+            timer.cancel()
+            queue.sync {
+                if let snapshot {
+                    peak.record(snapshot)
+                }
+                print(
+                    "🧠 [OpenReshot] \(phase) sampled peak: " +
+                    "duration=\(String(format: "%.2fs", -start.timeIntervalSinceNow)), " +
+                    "samples=\(peak.sampleCount), " +
+                    "residentMax=\(format(peak.resident)), " +
+                    "residentPeakMax=\(format(peak.residentPeak)), " +
+                    "footprintWindowMax=\(format(peak.physicalFootprint)), " +
+                    "footprintMax=\(format(peak.physicalFootprint)), " +
+                    "footprintPeakMax=\(format(peak.physicalFootprintPeak)), " +
+                    "internalMax=\(format(peak.internalBytes)), " +
+                    "externalMax=\(format(peak.externalBytes)), " +
+                    "compressedMax=\(format(peak.compressedBytes))"
+                )
+                sampledPeakLock.lock()
+                sampledPeaksByPhase[phase] = peak
+                sampledPeakLock.unlock()
+            }
+        }
+
+        return try work()
+    }
+
+    static func sampledPeak(for phase: String) -> SampledPeak? {
+        sampledPeakLock.lock()
+        let peak = sampledPeaksByPhase[phase]
+        sampledPeakLock.unlock()
+        return peak
+    }
+
+    static func clearSampledPeak(for phase: String) {
+        sampledPeakLock.lock()
+        sampledPeaksByPhase[phase] = nil
+        sampledPeakLock.unlock()
+    }
+
+    static var snapshot: Snapshot? {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return nil }
+        return Snapshot(
+            resident: UInt64(info.resident_size),
+            residentPeak: UInt64(info.resident_size_peak),
+            physicalFootprint: UInt64(info.phys_footprint),
+            physicalFootprintPeak: UInt64(max(0, info.ledger_phys_footprint_peak)),
+            internalBytes: UInt64(info.internal),
+            externalBytes: UInt64(info.external),
+            compressedBytes: UInt64(info.compressed)
+        )
+    }
+
+    static var currentSummary: String {
+        guard let snapshot else { return "memory=unavailable" }
+        return "resident=\(format(snapshot.resident)), residentPeak=\(format(snapshot.residentPeak)), footprint=\(format(snapshot.physicalFootprint)), footprintPeak=\(format(snapshot.physicalFootprintPeak)), internal=\(format(snapshot.internalBytes)), external=\(format(snapshot.externalBytes)), compressed=\(format(snapshot.compressedBytes))"
+    }
+
+    static func format(_ bytes: UInt64) -> String {
+        String(format: "%.1fMB", Double(bytes) / 1_048_576.0)
+    }
 }
 
 @main
@@ -55,21 +520,21 @@ enum RenderQuality: String, CaseIterable, Identifiable {
         }
     }
 
-    func splatBudget(memoryGB: UInt64) -> Int {
+    func splatBudget(memoryGB _: UInt64) -> Int {
         switch self {
         case .high:
-            return memoryGB >= 8 ? 1_200_000 : 320_000
+            return 1_200_000
         case .smooth:
-            return memoryGB >= 8 ? 320_000 : 180_000
+            return 320_000
         }
     }
 
-    func renderScale(memoryGB: UInt64) -> CGFloat {
+    func renderScale(memoryGB _: UInt64) -> CGFloat {
         switch self {
         case .high:
-            return memoryGB >= 8 ? 2.0 : 1.5
+            return 2.0
         case .smooth:
-            return memoryGB >= 8 ? 1.35 : 1.2
+            return 1.35
         }
     }
 
@@ -171,6 +636,45 @@ enum ProcessFailureKind: Equatable {
     case enhancement
 }
 
+private struct OpenReshotMemoryAutoTestCase {
+    let modelSelection: OpenReshotModelSelection
+    let profile: OpenReshotMemoryTestProfile
+    let loadTimeoutSeconds: TimeInterval?
+
+    var id: String { "\(modelSelection.rawValue)-\(profile.rawValue)" }
+    var title: String { "\(modelSelection.title) \(profile.title)" }
+
+    static func defaultCases(for modelSelection: OpenReshotModelSelection) -> [OpenReshotMemoryAutoTestCase] {
+        if modelSelection.usesQuantizedWeights {
+            return []
+        }
+        switch modelSelection {
+        case .automatic:
+            return [
+                .init(modelSelection: .bundled1536, profile: .cpuNoBackings),
+                .init(modelSelection: .bundled1280, profile: .cpuNoBackings),
+                .init(modelSelection: .bundled1024, profile: .cpuNoBackings),
+                .init(modelSelection: .bundled896, profile: .cpuNoBackings),
+                .init(modelSelection: .bundled768, profile: .cpuNoBackings)
+            ]
+        case .bundled1536, .bundled1280, .bundled1024, .bundled896, .bundled768, .downloaded:
+            return [.init(modelSelection: modelSelection, profile: .cpuNoBackings)]
+        case .bundledInt4, .bundledPalettize4:
+            return []
+        }
+    }
+
+    init(
+        modelSelection: OpenReshotModelSelection,
+        profile: OpenReshotMemoryTestProfile,
+        loadTimeoutSeconds: TimeInterval? = nil
+    ) {
+        self.modelSelection = modelSelection
+        self.profile = profile
+        self.loadTimeoutSeconds = loadTimeoutSeconds
+    }
+}
+
 private struct PreviewExportMetadata: Codable, Sendable {
     let formatVersion: Int
     let splatFormat: String
@@ -188,6 +692,7 @@ struct ReshotCacheItem: Codable, Identifiable, Equatable {
     let formatVersion: Int
     let createdAt: Date
     let sourceSignature: String
+    let modelSelection: String?
     let quality: String
     let splatCount: Int
     let focus: Float
@@ -236,8 +741,14 @@ private enum ReshotCacheStore {
         .sorted { $0.createdAt > $1.createdAt }
     }
 
-    static func item(matching sourceSignature: String, quality: RenderQuality) -> ReshotCacheItem? {
-        let items = loadItems().filter { $0.sourceSignature == sourceSignature }
+    static func item(
+        matching sourceSignature: String,
+        quality: RenderQuality,
+        modelSelection: OpenReshotModelSelection
+    ) -> ReshotCacheItem? {
+        let items = loadItems().filter {
+            $0.sourceSignature == sourceSignature && $0.modelSelection == modelSelection.rawValue
+        }
         return items.first { $0.quality == quality.rawValue } ?? items.first
     }
 
@@ -273,9 +784,11 @@ private enum ReshotCacheStore {
     }
 
     static func save(
-        points: [SplatPoint],
+        splatURL sourceSplatURL: URL,
+        splatCount: Int,
         sourceImage: UIImage,
         sourceSignature: String,
+        modelSelection: OpenReshotModelSelection,
         quality: RenderQuality,
         focus: Float,
         focalPixels: Float,
@@ -292,8 +805,9 @@ private enum ReshotCacheStore {
                 formatVersion: 1,
                 createdAt: Date(),
                 sourceSignature: sourceSignature,
+                modelSelection: modelSelection.rawValue,
                 quality: quality.rawValue,
-                splatCount: points.count,
+                splatCount: splatCount,
                 focus: focus,
                 focalPixels: focalPixels,
                 width: width,
@@ -310,18 +824,15 @@ private enum ReshotCacheStore {
             try? fileManager.removeItem(at: temporaryDirectory)
             try fileManager.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
 
-            guard let sourceData = sourceImage.jpegData(compressionQuality: 0.94),
-                  let thumbnailData = thumbnailImage(from: sourceImage).jpegData(compressionQuality: 0.82) else {
+            guard let sourceData = jpegData(from: sourceImage, compressionQuality: 0.94),
+                  let thumbnailData = jpegData(from: thumbnailImage(from: sourceImage), compressionQuality: 0.82) else {
                 throw err("缓存图片编码失败".localized)
             }
             try sourceData.write(to: temporaryDirectory.appendingPathComponent(sourceImageName), options: [.atomic])
             try thumbnailData.write(to: temporaryDirectory.appendingPathComponent(thumbnailImageName), options: [.atomic])
 
             let plyURL = temporaryDirectory.appendingPathComponent(splatFileName)
-            let writer = try SplatPLYSceneWriter(toFileAtPath: plyURL.path)
-            try await writer.start(sphericalHarmonicDegree: 0, binary: true, pointCount: points.count)
-            try await writer.write(points)
-            try await writer.close()
+            try fileManager.copyItem(at: sourceSplatURL, to: plyURL)
 
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -362,6 +873,7 @@ private enum ReshotCacheStore {
             formatVersion: 1,
             createdAt: Date(timeIntervalSince1970: 0),
             sourceSignature: bundledDemoID,
+            modelSelection: nil,
             quality: "demo",
             splatCount: 1_179_648,
             focus: 1.4492188,
@@ -385,6 +897,44 @@ private enum ReshotCacheStore {
         return UIGraphicsImageRenderer(size: targetSize, format: format).image { _ in
             image.draw(in: CGRect(origin: .zero, size: targetSize))
         }
+    }
+
+    private static func jpegData(from image: UIImage, compressionQuality: CGFloat) -> Data? {
+        let width = max(1, Int((image.size.width * image.scale).rounded()))
+        let height = max(1, Int((image.size.height * image.scale).rounded()))
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.noneSkipLast.rawValue
+        guard let context = CGContext(data: nil,
+                                      width: width,
+                                      height: height,
+                                      bitsPerComponent: 8,
+                                      bytesPerRow: 0,
+                                      space: colorSpace,
+                                      bitmapInfo: bitmapInfo) else {
+            return image.jpegData(compressionQuality: compressionQuality)
+        }
+        context.interpolationQuality = .high
+        context.setFillColor(UIColor.white.cgColor)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        UIGraphicsPushContext(context)
+        image.draw(in: CGRect(x: 0, y: 0, width: width, height: height))
+        UIGraphicsPopContext()
+
+        guard let cgImage = context.makeImage() else {
+            return image.jpegData(compressionQuality: compressionQuality)
+        }
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(data, UTType.jpeg.identifier as CFString, 1, nil) else {
+            return nil
+        }
+        let options: [CFString: Any] = [
+            kCGImageDestinationLossyCompressionQuality: compressionQuality
+        ]
+        CGImageDestinationAddImage(destination, cgImage, options as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else {
+            return nil
+        }
+        return data as Data
     }
 }
 
@@ -416,6 +966,34 @@ final class AppState: ObservableObject {
     @Published var subjectProtectionMask: UIImage?
     @Published var geminiKey: String
     @Published var hasExportablePreview = false
+    @Published var memoryAutoTestEnabled: Bool = UserDefaults.standard.bool(forKey: "OpenReshot.memoryAutoTestEnabled") {
+        didSet {
+            guard oldValue != memoryAutoTestEnabled else { return }
+            UserDefaults.standard.set(memoryAutoTestEnabled, forKey: Self.memoryAutoTestEnabledKey)
+            print("🧪 [OpenReshot] memory auto test \(memoryAutoTestEnabled ? "enabled" : "disabled")")
+        }
+    }
+    @Published var memoryAutoTestRunning = false
+    @Published var memoryAutoTestStatus = ""
+    @Published var memoryTestProfile: OpenReshotMemoryTestProfile = .saved {
+        didSet {
+            guard oldValue != memoryTestProfile else { return }
+            OpenReshotMemoryTestProfile.saved = memoryTestProfile
+            invalidateModelCache()
+            print("🧪 [OpenReshot] memory test profile set to \(memoryTestProfile.rawValue)")
+        }
+    }
+    @Published var modelSelection: OpenReshotModelSelection = .saved {
+        didSet {
+            guard oldValue != modelSelection else { return }
+            OpenReshotModelSelection.saved = modelSelection
+            invalidateModelCache()
+            Task { @MainActor [modelStore] in
+                modelStore.refreshInstallState()
+            }
+            print("🧪 [OpenReshot] model selection set to \(modelSelection.rawValue)")
+        }
+    }
     @Published var lensFocusDepth: Float = 1
     @Published var lensFocusMin: Float = 0.25
     @Published var lensFocusMax: Float = 4
@@ -427,6 +1005,8 @@ final class AppState: ObservableObject {
     var renderer: ReshootRenderer?
     private let modelQueue = DispatchQueue(label: "OpenReshot.model", qos: .userInitiated)
     private var cachedModel: SharpModel?
+    private var cachedModelBackend: SharpComputeBackend?
+    private var cachedModelURL: URL?
     private var currentSourceData: Data?
     private var memoryWarningObserver: NSObjectProtocol?
     private var activeTaskID = UUID()
@@ -434,8 +1014,9 @@ final class AppState: ObservableObject {
     private var reconstructionRequestID = UUID()
     private var enhanceTask: Task<Void, Never>?
     private var motionExportTask: Task<Void, Never>?
-    private var currentCloudPoints: [SplatPoint]?
     private var currentPreviewMetadata: PreviewExportMetadata?
+    private var currentPreviewSplatURL: URL?
+    private var currentPreviewSourceURL: URL?
     private var activeCacheItemID: String?
     private var pendingCachedReshot: ReshotCacheItem?
     private var demoScenePending = false
@@ -457,6 +1038,9 @@ final class AppState: ObservableObject {
     private static let demoSceneWidth = 941
     private static let demoSceneHeight = 1672
     private static let didAutoloadDemoSceneKey = "OpenReshot.didAutoloadDemoScene"
+    private static let memoryAutoTestEnabledKey = "OpenReshot.memoryAutoTestEnabled"
+    private static let subjectMaskFootprintLimitMB: Double = 2800
+    private static let subjectMaskDelayAttempts = 4
     private static var memoryGB: UInt64 { ProcessInfo.processInfo.physicalMemory / 1_073_741_824 }
     private static let enhancePrompt = """
     This image is a novel-view render produced from a 3D Gaussian Splatting reconstruction. Because the camera viewpoint changed, some newly exposed edges, disoccluded regions, stretched areas, warped details, holes, and blurry splat artifacts may appear.
@@ -469,6 +1053,9 @@ final class AppState: ObservableObject {
     """
 
     init() {
+        OpenReshotDebugFlags.logActiveFlags()
+        OpenReshotDiagnostics.logRuntimeEnvironment()
+        OpenReshotMemoryProbe.log("app state init")
         geminiKey = UserDefaults.standard.string(forKey: "OpenReshot.geminiKey") ?? ""
         galleryItems = ReshotCacheStore.galleryItems()
         memoryWarningObserver = NotificationCenter.default.addObserver(
@@ -476,12 +1063,16 @@ final class AppState: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
+            OpenReshotMemoryProbe.log("memory warning received")
             self?.modelQueue.async {
                 self?.cachedModel = nil
+                self?.cachedModelBackend = nil
+                self?.cachedModelURL = nil
                 print("🧹 [OpenReshot] released cached reconstruction model after memory warning")
+                OpenReshotMemoryProbe.log("memory warning model cache release")
             }
         }
-    }
+        }
 
     deinit {
         if let memoryWarningObserver {
@@ -495,12 +1086,14 @@ final class AppState: ObservableObject {
         renderer.setMotionRangeScale(viewAngleMode.motionScale)
         renderer.onReady = { [weak self] in
             guard let self, self.inputImage != nil else { return }
+            OpenReshotMemoryProbe.log("renderer onReady")
             self.rendererReady = true
             self.loadingPreviewScene = false
             self.reconstructingScene = false
             self.processFailed = false
             self.processFailureKind = nil
             self.status = ""
+            self.updateSubjectProtectionMaskIfReady()
         }
         renderer.onFailure = { [weak self] message in
             guard let self, self.inputImage != nil else { return }
@@ -541,8 +1134,9 @@ final class AppState: ObservableObject {
         enhanceTask = nil
         renderer?.clearCloud()
         currentSourceData = nil
-        currentCloudPoints = nil
         currentPreviewMetadata = nil
+        currentPreviewSplatURL = nil
+        currentPreviewSourceURL = nil
         hasExportablePreview = false
         resetLensControls(focus: Self.demoSceneFocus)
         inputImage = image
@@ -569,9 +1163,10 @@ final class AppState: ObservableObject {
     }
 
     @MainActor
-    func beginImageLoadTask() -> UUID {
-        let taskID = UUID()
+    func beginImageLoadTask(taskID: UUID = UUID()) -> UUID {
+        OpenReshotMemoryProbe.log("begin image load task")
         resetTaskState(taskID: taskID, clearImage: true)
+        OpenReshotMemoryProbe.log("after begin image load reset")
         return taskID
     }
 
@@ -583,6 +1178,233 @@ final class AppState: ObservableObject {
     @MainActor
     func isCurrentTask(_ taskID: UUID) -> Bool {
         activeTaskID == taskID
+    }
+
+    func activeModelURL() -> URL? {
+        modelStore.activeModelURL(selection: modelSelection)
+    }
+
+    func resolvedModelSelection(_ selection: OpenReshotModelSelection) -> OpenReshotModelSelection {
+        guard selection == .automatic else { return selection }
+        if OpenReshotDebugFlags.preferDownloadedModel,
+           modelStore.activeModelURL(selection: .downloaded) != nil {
+            return .downloaded
+        }
+        let bundledFallbacks: [OpenReshotModelSelection] = [
+            .bundled1536,
+            .bundled1280,
+            .bundled1024,
+            .bundled896,
+            .bundled768
+        ]
+        if let bundled = bundledFallbacks.first(where: { modelStore.activeModelURL(selection: $0) != nil }) {
+            return bundled
+        }
+        if modelStore.activeModelURL(selection: .downloaded) != nil {
+            return .downloaded
+        }
+        return .automatic
+    }
+
+    func modelSelectionIsAvailable(_ selection: OpenReshotModelSelection) -> Bool {
+        modelStore.activeModelURL(selection: selection) != nil
+    }
+
+    @MainActor
+    func processPickedImage(_ image: UIImage, sourceData: Data? = nil, taskID: UUID? = nil) {
+        if memoryAutoTestEnabled {
+            runMemoryAutoTest(image, sourceData: sourceData, taskID: taskID)
+        } else {
+            reconstruct(image, sourceData: sourceData, taskID: taskID)
+        }
+    }
+
+    @MainActor
+    func runMemoryAutoTest(_ image: UIImage, sourceData: Data? = nil, taskID: UUID? = nil) {
+        if let taskID, !isCurrentTask(taskID) {
+            print("↩️ [OpenReshot][AutoMem] ignored stale picked photo")
+            return
+        }
+        let requestID = taskID ?? UUID()
+        let displayImage = SharpModel.normalized(image, maxLongEdge: SharpModel.workingImageMaxLongEdge)
+        let selectedQuality = quality
+        let selectedModelSelection = modelSelection
+        let cases = OpenReshotMemoryAutoTestCase.defaultCases(for: selectedModelSelection).filter {
+            modelStore.activeModelURL(selection: $0.modelSelection) != nil
+        }
+        guard !cases.isEmpty else {
+            activeTaskID = requestID
+            reconstructionRequestID = requestID
+            reconstructingScene = false
+            processFailed = true
+            processFailureKind = .reconstruction
+            memoryAutoTestRunning = false
+            memoryAutoTestStatus = "当前模型不参与自动轮测"
+            print("⚠️ [OpenReshot][AutoMem] no test cases for model=\(selectedModelSelection.rawValue)")
+            return
+        }
+
+        print("🧪 [OpenReshot][AutoMem] round start: cases=\(cases.map(\.id).joined(separator: " -> ")), image=\(SharpModel.pixelSizeDescription(displayImage)), quality=\(selectedQuality.rawValue), model=\(selectedModelSelection.rawValue)")
+        OpenReshotMemoryProbe.log("AutoMem round start")
+        activeTaskID = requestID
+        reconstructionRequestID = requestID
+        subjectMaskRequestID = requestID
+        currentSourceData = sourceData
+        activeCacheItemID = nil
+        pendingCachedReshot = nil
+        enhanceTask?.cancel()
+        enhanceTask = nil
+        renderer?.clearCloud()
+        previewMode = false
+        loadingPreviewScene = false
+        demoScenePending = false
+        currentPreviewMetadata = nil
+        currentPreviewSplatURL = nil
+        currentPreviewSourceURL = nil
+        hasExportablePreview = false
+        inputImage = displayImage
+        imageAspect = max(0.1, displayImage.size.width / max(displayImage.size.height, 1))
+        hasCloud = false
+        rendererReady = false
+        sheenAmount = 0
+        sheenTiltX = 0
+        sheenTiltY = 0
+        motionTilt = .zero
+        reconstructingScene = true
+        reconstructingFrame = false
+        processFailed = false
+        processFailureKind = nil
+        capturedFrame = nil
+        resultImage = nil
+        saveState = .idle
+        subjectProtectionMask = nil
+        status = ""
+        memoryAutoTestRunning = true
+        memoryAutoTestStatus = "自动轮测 0/\(cases.count)"
+
+        modelQueue.async { [weak self, displayImage, sourceData, selectedQuality, selectedModelSelection, cases] in
+            guard let self else { return }
+            var passed = 0
+            var failed = 0
+
+            for (index, testCase) in cases.enumerated() {
+                var isCurrent = false
+                DispatchQueue.main.sync {
+                    isCurrent = self.activeTaskID == requestID && self.reconstructionRequestID == requestID
+                }
+                guard isCurrent else {
+                    print("↩️ [OpenReshot][AutoMem] round aborted by newer task")
+                    return
+                }
+
+                DispatchQueue.main.async {
+                    guard self.activeTaskID == requestID, self.reconstructionRequestID == requestID else { return }
+                    self.memoryAutoTestStatus = "\(index + 1)/\(cases.count) \(testCase.title)"
+                }
+
+                let caseStartedAt = Date()
+                print("🧪 [OpenReshot][AutoMem] case \(index + 1)/\(cases.count) start: id=\(testCase.id), title=\(testCase.title), model=\(testCase.modelSelection.rawValue), requestedModel=\(selectedModelSelection.rawValue), quality=\(selectedQuality.rawValue)")
+                do {
+                    try OpenReshotDebugFlags.withMemoryTestProfile(testCase.profile) {
+                        OpenReshotDebugFlags.logActiveFlags()
+                        OpenReshotMemoryProbe.log("AutoMem \(testCase.id) start")
+                        guard let modelURL = self.modelStore.activeModelURL(selection: testCase.modelSelection) else {
+                            throw err("automated memory test model missing: \(testCase.modelSelection.rawValue)")
+                        }
+                        let backend = testCase.profile.backend ?? SharpComputeBackend.preferred
+                        var model: SharpModel? = nil
+                        var output: SharpOutput? = nil
+                        var tempDirectory: URL?
+                        var splatCount = 0
+                        var focus: Float = 0
+                        defer {
+                            output = nil
+                            model = nil
+                            if let tempDirectory {
+                                try? FileManager.default.removeItem(at: tempDirectory)
+                            }
+                        }
+
+                        let loadPhase = "AutoMem \(testCase.id) MLModel load"
+                        let predictionPhase = "Core ML prediction"
+                        let plyPhase = "AutoMem \(testCase.id) PLY write"
+                        OpenReshotMemoryProbe.clearSampledPeak(for: loadPhase)
+                        OpenReshotMemoryProbe.clearSampledPeak(for: predictionPhase)
+                        OpenReshotMemoryProbe.clearSampledPeak(for: plyPhase)
+
+                        model = try OpenReshotMemoryProbe.measure(loadPhase) {
+                            try Self.loadSharpModel(
+                                modelURL: modelURL,
+                                backend: backend,
+                                timeoutSeconds: testCase.loadTimeoutSeconds
+                            )
+                        }
+                        let loadPeak = OpenReshotMemoryProbe.sampledPeak(for: loadPhase)
+                        let internalResolution = model?.internalResolution ?? 0
+                        OpenReshotMemoryProbe.log("AutoMem \(testCase.id) after model load")
+                        output = try autoreleasepool(invoking: {
+                            try model!.reconstruct(displayImage, sourceData: sourceData)
+                        })
+                        let predictionPeak = OpenReshotMemoryProbe.sampledPeak(for: predictionPhase)
+                        OpenReshotMemoryProbe.log("AutoMem \(testCase.id) after inference")
+
+                        guard let sharpOutput = output else {
+                            throw err("empty automated memory test output")
+                        }
+                        let tempSplatURL = try Self.makeTemporaryPreviewSplatURL()
+                        tempDirectory = tempSplatURL.deletingLastPathComponent()
+                        let fileResult = try OpenReshotMemoryProbe.measure(plyPhase) {
+                            try Self.waitForAsync {
+                                try await GaussianCloud.writePLY(from: sharpOutput, quality: selectedQuality, to: tempSplatURL)
+                            }
+                        }
+                        let plyPeak = OpenReshotMemoryProbe.sampledPeak(for: plyPhase)
+                        splatCount = fileResult.splatCount
+                        focus = fileResult.focus
+                        print("🧪 [OpenReshot][AutoMem] case \(testCase.id) PLY done: splats=\(splatCount), focus=\(focus)")
+                        OpenReshotMemoryProbe.log("AutoMem \(testCase.id) after PLY write")
+                        output = nil
+                        model = nil
+                        OpenReshotMemoryProbe.log("AutoMem \(testCase.id) after release")
+
+                        let caseFootprintMax = [
+                            loadPeak?.physicalFootprint,
+                            predictionPeak?.physicalFootprint,
+                            plyPeak?.physicalFootprint
+                        ].compactMap { $0 }.max()
+                        let loadFootprint = loadPeak.map { OpenReshotMemoryProbe.format($0.physicalFootprint) } ?? "<missing>"
+                        let predictionFootprint = predictionPeak.map { OpenReshotMemoryProbe.format($0.physicalFootprint) } ?? "<missing>"
+                        let plyFootprint = plyPeak.map { OpenReshotMemoryProbe.format($0.physicalFootprint) } ?? "<missing>"
+                        let caseFootprint = caseFootprintMax.map(OpenReshotMemoryProbe.format) ?? "<missing>"
+                        let predictionResident = predictionPeak.map { OpenReshotMemoryProbe.format($0.resident) } ?? "<missing>"
+                        print("🧪 [OpenReshot][AutoMem] case metrics: id=\(testCase.id), model=\(testCase.modelSelection.rawValue), internalResolution=\(internalResolution), loadFootprintWindowMax=\(loadFootprint), predictionFootprintWindowMax=\(predictionFootprint), plyFootprintWindowMax=\(plyFootprint), caseFootprintWindowMax=\(caseFootprint), predictionResidentMax=\(predictionResident), splats=\(splatCount), focus=\(focus)")
+                    }
+                    passed += 1
+                    print("🧪 [OpenReshot][AutoMem] case \(index + 1)/\(cases.count) success: id=\(testCase.id), elapsed=\(String(format: "%.2fs", -caseStartedAt.timeIntervalSinceNow)), \(OpenReshotMemoryProbe.currentSummary)")
+                } catch {
+                    failed += 1
+                    print("❌ [OpenReshot][AutoMem] case \(index + 1)/\(cases.count) failed: id=\(testCase.id), elapsed=\(String(format: "%.2fs", -caseStartedAt.timeIntervalSinceNow)), error=\(error), \(OpenReshotMemoryProbe.currentSummary)")
+                }
+
+                Thread.sleep(forTimeInterval: 0.35)
+            }
+
+            self.cachedModel = nil
+            self.cachedModelBackend = nil
+            self.cachedModelURL = nil
+            DispatchQueue.main.async {
+                guard self.activeTaskID == requestID, self.reconstructionRequestID == requestID else { return }
+                self.memoryAutoTestRunning = false
+                self.memoryAutoTestStatus = failed == 0 ? "测试完成 \(passed)/\(cases.count)" : "测试完成 \(passed)/\(cases.count),失败 \(failed)"
+                self.reconstructingScene = false
+                self.currentSourceData = nil
+                self.processFailed = failed > 0
+                self.processFailureKind = failed > 0 ? .reconstruction : nil
+                self.status = ""
+            }
+            OpenReshotMemoryProbe.log("AutoMem round finished")
+            print("🧪 [OpenReshot][AutoMem] round finished: passed=\(passed), failed=\(failed), \(OpenReshotMemoryProbe.currentSummary)")
+        }
     }
 
     @MainActor
@@ -601,16 +1423,40 @@ final class AppState: ObservableObject {
             print("↩️ [OpenReshot] ignored stale picked photo")
             return
         }
-        print("🔧 [OpenReshot] reconstruct start: \(Int(image.size.width))x\(Int(image.size.height)) @\(image.scale)x")
-        let displayImage = SharpModel.normalized(image)
+        print("🔧 [OpenReshot] reconstruct start: \(SharpModel.pixelSizeDescription(image)) @\(image.scale)x")
+        OpenReshotDebugFlags.logActiveFlags()
+        let requestedModelSelection = modelSelection
+        let selectedModelSelection = resolvedModelSelection(requestedModelSelection)
+        print("🧪 [OpenReshot] selected model: \(requestedModelSelection.title), resolved=\(selectedModelSelection.title)")
+        OpenReshotMemoryProbe.log("reconstruct start")
+        let displayImage = SharpModel.normalized(image, maxLongEdge: SharpModel.workingImageMaxLongEdge)
+        if SharpModel.pixelSizeDescription(displayImage) != SharpModel.pixelSizeDescription(image) || image.imageOrientation != .up {
+            print("🖼️ [OpenReshot] working image prepared: \(SharpModel.pixelSizeDescription(image)) -> \(SharpModel.pixelSizeDescription(displayImage))")
+        }
+        OpenReshotMemoryProbe.log("after image normalize")
         let requestID = taskID ?? UUID()
-        let hasInstalledModel = modelStore.activeModelURL() != nil
+        let hasInstalledModel = activeModelURL() != nil
         let selectedQuality = quality
-        let sourceSignature = Self.sourceSignature(for: displayImage)
-        if let sourceSignature,
-           let cachedItem = ReshotCacheStore.item(matching: sourceSignature, quality: selectedQuality) {
-            print("♻️ [OpenReshot] loading cached reconstruction \(cachedItem.id)")
-            loadCachedReshot(cachedItem, sourceOverride: displayImage, sourceData: sourceData, taskID: requestID)
+        let sourceSignature = sourceData.map(Self.sourceSignature(for:))
+        if OpenReshotDebugFlags.noCache {
+            print("🧪 [OpenReshot] cache lookup skipped by -openreshotNoCache")
+        }
+        if !OpenReshotDebugFlags.noCache,
+           let sourceSignature,
+           let cachedItem = ReshotCacheStore.item(
+                matching: sourceSignature,
+                quality: selectedQuality,
+                modelSelection: selectedModelSelection
+           ) {
+            print("♻️ [OpenReshot] loading cached reconstruction \(cachedItem.id) model=\(selectedModelSelection.rawValue)")
+            OpenReshotMemoryProbe.log("cache hit before load")
+            let providedTaskID = taskID
+            Task { @MainActor [weak self] in
+                await Task.yield()
+                guard let self else { return }
+                if providedTaskID != nil, !self.isCurrentTask(requestID) { return }
+                self.loadCachedReshot(cachedItem, sourceOverride: displayImage, sourceData: sourceData, taskID: requestID)
+            }
             return
         }
         activeTaskID = requestID
@@ -624,8 +1470,9 @@ final class AppState: ObservableObject {
         previewMode = false
         loadingPreviewScene = false
         demoScenePending = false
-        currentCloudPoints = nil
         currentPreviewMetadata = nil
+        currentPreviewSplatURL = nil
+        currentPreviewSourceURL = nil
         hasExportablePreview = false
         inputImage = displayImage
         imageAspect = max(0.1, displayImage.size.width / max(displayImage.size.height, 1))
@@ -645,7 +1492,7 @@ final class AppState: ObservableObject {
         subjectProtectionMask = nil
         status = ""
         subjectMaskRequestID = requestID
-        updateSubjectProtectionMask(for: displayImage, requestID: requestID)
+        OpenReshotMemoryProbe.log("after reconstruction state reset")
         guard hasInstalledModel else {
             print("⚠️ [OpenReshot] reconstruction model missing; prompting download")
             return
@@ -653,47 +1500,99 @@ final class AppState: ObservableObject {
         modelQueue.async { [weak self] in
             guard let self else { return }
             do {
-                let model = try self.loadCachedModel()
-                print("✅ [OpenReshot] running inference (\(selectedQuality.title))…")
-                let t0 = Date()
-                let out = try model.reconstruct(displayImage, sourceData: sourceData)
-                print("✅ [OpenReshot] inference done in \(Int(-t0.timeIntervalSinceNow))s, \(out.count) gaussians")
-                let (g, focus) = GaussianCloud.build(from: out, quality: selectedQuality)
-                print("✅ [OpenReshot] cloud built, focus=\(focus)")
+                OpenReshotMemoryProbe.log("model queue start")
+                var output: SharpOutput? = try {
+                    OpenReshotMemoryProbe.log("before model load")
+                    print("✅ [OpenReshot] running Core ML inference (\(selectedQuality.title))…")
+                    let t0 = Date()
+                    let model = try OpenReshotMemoryProbe.measure("MLModel load") {
+                        try self.loadCachedModel()
+                    }
+                    OpenReshotMemoryProbe.log("after model load")
+                    OpenReshotMemoryProbe.log("before inference")
+                    let result = try autoreleasepool(invoking: {
+                        try model.reconstruct(displayImage, sourceData: sourceData)
+                    })
+                    OpenReshotMemoryProbe.log("after inference")
+                    print("✅ [OpenReshot] inference done in \(Int(-t0.timeIntervalSinceNow))s, \(result.count) gaussians")
+                    return result
+                }()
+                let fpx = output?.fpx ?? 0
+                let width = output?.width ?? 0
+                let height = output?.height ?? 0
+                OpenReshotMemoryProbe.log("after inference scope")
+                if !OpenReshotDebugFlags.keepModelCache || OpenReshotDebugFlags.releaseModelBeforeRenderer {
+                    self.cachedModel = nil
+                    self.cachedModelBackend = nil
+                    self.cachedModelURL = nil
+                    print("🧹 [OpenReshot] released reconstruction model after inference")
+                    OpenReshotMemoryProbe.log("after model release after inference")
+                }
+                let tempSplatURL = try Self.makeTemporaryPreviewSplatURL()
+                let fileResult: GaussianCloud.FileBuildResult
+                do {
+                    guard let sharpOutput = output else {
+                        throw err("empty reconstruction output")
+                    }
+                    OpenReshotMemoryProbe.log("before PLY write")
+                    fileResult = try Self.waitForAsync {
+                        try await GaussianCloud.writePLY(from: sharpOutput, quality: selectedQuality, to: tempSplatURL)
+                    }
+                }
+                OpenReshotMemoryProbe.log("after PLY write")
+                output = nil
+                OpenReshotMemoryProbe.log("after SharpOutput release")
+                print("✅ [OpenReshot] cloud file built, focus=\(fileResult.focus)")
                 DispatchQueue.main.async {
                     guard self.activeTaskID == requestID, self.reconstructionRequestID == requestID else {
                         print("↩️ [OpenReshot] ignored stale reconstruction result")
+                        try? FileManager.default.removeItem(at: fileResult.url.deletingLastPathComponent())
                         return
                     }
                     if self.renderer == nil { print("❌ [OpenReshot] renderer is nil (Metal init failed)") }
-                    self.renderer?.setCloud(g, focus: focus,
-                                            fpx: out.fpx, width: out.width, height: out.height)
-                    self.resetLensControls(focus: focus)
+                    OpenReshotMemoryProbe.log("before renderer setCloud from reconstruction")
+                    if OpenReshotDebugFlags.noRenderer {
+                        print("🧪 [OpenReshot] renderer skipped by -openreshotNoRenderer")
+                        self.loadingPreviewScene = false
+                        self.reconstructingScene = false
+                        self.rendererReady = false
+                        OpenReshotMemoryProbe.log("after renderer skip from reconstruction")
+                    } else {
+                        self.renderer?.setCloud(from: fileResult.url,
+                                                expectedSplatCount: fileResult.splatCount,
+                                                focus: fileResult.focus,
+                                                fpx: fpx, width: width, height: height)
+                    }
+                    self.resetLensControls(focus: fileResult.focus)
                     self.hasCloud = true
-                    self.currentCloudPoints = g
+                    self.currentSourceData = nil
                     self.currentPreviewMetadata = PreviewExportMetadata(
                         formatVersion: 1,
                         splatFormat: "ply-sh0",
-                        splatCount: g.count,
-                        focus: focus,
-                        focalPixels: out.fpx,
-                        width: out.width,
-                        height: out.height,
-                        sourceImageName: "OpenReshotPreview.png",
+                        splatCount: fileResult.splatCount,
+                        focus: fileResult.focus,
+                        focalPixels: fpx,
+                        width: width,
+                        height: height,
+                        sourceImageName: "OpenReshotPreview.jpg",
                         splatFileName: "OpenReshotPreview.ply"
                     )
-                    self.hasExportablePreview = true
+                    self.currentPreviewSplatURL = nil
+                    self.currentPreviewSourceURL = nil
+                    self.hasExportablePreview = false
                     self.status = ""
                     if let sourceSignature {
                         self.persistReshotCache(
-                            points: g,
+                            splatURL: fileResult.url,
+                            splatCount: fileResult.splatCount,
                             sourceImage: displayImage,
                             sourceSignature: sourceSignature,
+                            modelSelection: selectedModelSelection,
                             quality: selectedQuality,
-                            focus: focus,
-                            focalPixels: out.fpx,
-                            width: out.width,
-                            height: out.height,
+                            focus: fileResult.focus,
+                            focalPixels: fpx,
+                            width: width,
+                            height: height,
                             taskID: requestID
                         )
                     }
@@ -711,12 +1610,46 @@ final class AppState: ObservableObject {
         }
     }
 
+    @MainActor
+    private func updateSubjectProtectionMaskIfReady(attempt: Int = 0) {
+        guard rendererReady, subjectProtectionMask == nil, let inputImage else { return }
+        if OpenReshotDebugFlags.noSubjectMask {
+            print("🧪 [OpenReshot] foreground subject mask skipped by -openreshotNoSubjectMask")
+            OpenReshotMemoryProbe.log("subject mask skipped")
+            return
+        }
+        if let snapshot = OpenReshotMemoryProbe.snapshot {
+            let footprintMB = Double(snapshot.physicalFootprint) / 1_048_576.0
+            if footprintMB > Self.subjectMaskFootprintLimitMB {
+                guard attempt < Self.subjectMaskDelayAttempts else {
+                    print("⚠️ [OpenReshot] foreground subject mask skipped under memory pressure (\(Int(footprintMB))MB)")
+                    OpenReshotMemoryProbe.log("subject mask skipped under memory pressure")
+                    return
+                }
+                let requestID = activeTaskID
+                print("⏳ [OpenReshot] delaying subject mask under memory pressure (\(Int(footprintMB))MB, attempt \(attempt + 1))")
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    guard let self, self.activeTaskID == requestID else { return }
+                    self.updateSubjectProtectionMaskIfReady(attempt: attempt + 1)
+                }
+                return
+            }
+        }
+        let requestID = activeTaskID
+        subjectMaskRequestID = requestID
+        updateSubjectProtectionMask(for: inputImage, requestID: requestID)
+    }
+
     private func updateSubjectProtectionMask(for image: UIImage, requestID: UUID) {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            OpenReshotMemoryProbe.log("subject mask start")
             let mask = Self.makeSubjectProtectionMask(from: image)
+            OpenReshotMemoryProbe.log("subject mask finished")
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.activeTaskID == requestID, self.subjectMaskRequestID == requestID else { return }
                 self.subjectProtectionMask = mask
+                OpenReshotMemoryProbe.log("subject mask assigned")
                 print(mask == nil
                       ? "⚠️ [OpenReshot] no foreground subject mask"
                       : "✅ [OpenReshot] foreground subject mask ready")
@@ -725,19 +1658,33 @@ final class AppState: ObservableObject {
     }
 
     private func loadCachedModel() throws -> SharpModel {
-        if let cachedModel {
-            print("♻️ [OpenReshot] reusing cached reconstruction model")
+        let backend = SharpComputeBackend.preferred
+        guard let modelURL = activeModelURL() else {
+            throw err("Reconstruction model not installed for \(modelSelection.title)")
+        }
+        if let cachedModel, cachedModelBackend == backend, cachedModelURL == modelURL {
+            print("♻️ [OpenReshot] reusing cached reconstruction model (\(backend.rawValue))")
+            OpenReshotMemoryProbe.log("reuse cached model")
             return cachedModel
         }
-        print("⏳ [OpenReshot] loading reconstruction model…")
-        let model = try SharpModel(modelURL: modelStore.activeModelURL())
+        cachedModel = nil
+        cachedModelBackend = nil
+        cachedModelURL = nil
+        print("⏳ [OpenReshot] loading reconstruction model (\(backend.rawValue))…")
+        OpenReshotMemoryProbe.log("MLModel load start")
+        let model = try SharpModel(modelURL: modelURL, backend: backend)
+        OpenReshotMemoryProbe.log("MLModel load finished")
         cachedModel = model
+        cachedModelBackend = backend
+        cachedModelURL = modelURL
         return model
     }
 
     func invalidateModelCache() {
         modelQueue.async { [weak self] in
             self?.cachedModel = nil
+            self?.cachedModelBackend = nil
+            self?.cachedModelURL = nil
             print("🧹 [OpenReshot] reconstruction model cache invalidated")
         }
     }
@@ -784,15 +1731,15 @@ final class AppState: ObservableObject {
 
     @MainActor
     func exportCurrentPreviewPackage() async throws -> [URL] {
-        guard let points = currentCloudPoints,
-              let metadata = currentPreviewMetadata,
-              let imageData = inputImage?.pngData() else {
+        guard let splatURL = currentPreviewSplatURL,
+              let sourceURL = currentPreviewSourceURL,
+              let metadata = currentPreviewMetadata else {
             throw err("当前没有可导出的 3D 预览".localized)
         }
 
         let urls = try await Self.writePreviewExportPackage(
-            points: points,
-            imageData: imageData,
+            splatURL: splatURL,
+            sourceURL: sourceURL,
             metadata: metadata
         )
         return urls
@@ -952,9 +1899,12 @@ final class AppState: ObservableObject {
         activeCacheItemID = nil
         previewMode = false
         loadingPreviewScene = false
-        currentCloudPoints = nil
         currentPreviewMetadata = nil
+        currentPreviewSplatURL = nil
+        currentPreviewSourceURL = nil
         hasExportablePreview = false
+        memoryAutoTestRunning = false
+        memoryAutoTestStatus = ""
         resetLensControls(focus: 1)
         status = ""
         hasCloud = false
@@ -997,7 +1947,17 @@ final class AppState: ObservableObject {
         }
 
         loadingPreviewScene = true
+        OpenReshotMemoryProbe.log("before demo renderer setCloud")
+        if OpenReshotDebugFlags.noRenderer {
+            print("🧪 [OpenReshot] demo renderer skipped by -openreshotNoRenderer")
+            loadingPreviewScene = false
+            demoScenePending = false
+            hasCloud = true
+            OpenReshotMemoryProbe.log("after demo renderer skip")
+            return
+        }
         let didStart = renderer.setCloud(from: sceneURL,
+                                         expectedSplatCount: 1_179_648,
                                          focus: Self.demoSceneFocus,
                                          fpx: Self.demoSceneFocalPixels,
                                          width: Self.demoSceneWidth,
@@ -1015,6 +1975,7 @@ final class AppState: ObservableObject {
         sourceData: Data? = nil,
         taskID: UUID = UUID()
     ) {
+        OpenReshotMemoryProbe.log("load cached reshot start")
         guard let sourceURL = ReshotCacheStore.sourceURL(for: item),
               let sourceImage = sourceOverride ?? UIImage(contentsOfFile: sourceURL.path) else {
             processFailed = true
@@ -1023,13 +1984,14 @@ final class AppState: ObservableObject {
             refreshGallery()
             return
         }
+        OpenReshotMemoryProbe.log("after cached source image load")
 
         activeTaskID = taskID
         reconstructionRequestID = taskID
         subjectMaskRequestID = taskID
         activeCacheItemID = item.id
         pendingCachedReshot = item
-        currentSourceData = sourceData ?? (try? Data(contentsOf: sourceURL))
+        currentSourceData = sourceData
         enhanceTask?.cancel()
         enhanceTask = nil
         motionExportTask?.cancel()
@@ -1042,8 +2004,9 @@ final class AppState: ObservableObject {
         reconstructingFrame = false
         processFailed = false
         processFailureKind = nil
-        currentCloudPoints = nil
         currentPreviewMetadata = nil
+        currentPreviewSplatURL = nil
+        currentPreviewSourceURL = nil
         hasExportablePreview = false
         inputImage = sourceImage
         imageAspect = max(0.1, CGFloat(item.width) / CGFloat(max(item.height, 1)))
@@ -1063,7 +2026,21 @@ final class AppState: ObservableObject {
         subjectProtectionMask = nil
         status = ""
         resetLensControls(focus: item.focus)
-        updateSubjectProtectionMask(for: sourceImage, requestID: taskID)
+        currentPreviewSplatURL = ReshotCacheStore.splatURL(for: item)
+        currentPreviewSourceURL = sourceURL
+        currentPreviewMetadata = PreviewExportMetadata(
+            formatVersion: 1,
+            splatFormat: "ply-sh0",
+            splatCount: item.splatCount,
+            focus: item.focus,
+            focalPixels: item.focalPixels,
+            width: item.width,
+            height: item.height,
+            sourceImageName: Self.previewSourceImageName(for: sourceURL),
+            splatFileName: "OpenReshotPreview.ply"
+        )
+        hasExportablePreview = currentPreviewSplatURL != nil && currentPreviewSourceURL != nil
+        OpenReshotMemoryProbe.log("after cached reshot state reset")
         startPendingCachedReshotIfPossible()
     }
 
@@ -1081,7 +2058,19 @@ final class AppState: ObservableObject {
         }
 
         loadingPreviewScene = true
+        OpenReshotMemoryProbe.log("before cached renderer setCloud")
+        if OpenReshotDebugFlags.noRenderer {
+            print("🧪 [OpenReshot] cached renderer skipped by -openreshotNoRenderer")
+            pendingCachedReshot = nil
+            loadingPreviewScene = false
+            reconstructingScene = false
+            rendererReady = false
+            hasCloud = true
+            OpenReshotMemoryProbe.log("after cached renderer skip")
+            return
+        }
         let didStart = renderer.setCloud(from: splatURL,
+                                         expectedSplatCount: item.splatCount,
                                          focus: item.focus,
                                          fpx: item.focalPixels,
                                          width: item.width,
@@ -1117,8 +2106,8 @@ final class AppState: ObservableObject {
     }
 
     private static func writePreviewExportPackage(
-        points: [SplatPoint],
-        imageData: Data,
+        splatURL sourceSplatURL: URL,
+        sourceURL sourceImageURL: URL,
         metadata: PreviewExportMetadata
     ) async throws -> [URL] {
         try await Task.detached(priority: .userInitiated) {
@@ -1131,12 +2120,8 @@ final class AppState: ObservableObject {
             let imageURL = directory.appendingPathComponent(metadata.sourceImageName)
             let jsonURL = directory.appendingPathComponent("OpenReshotPreview.json")
 
-            let writer = try SplatPLYSceneWriter(toFileAtPath: plyURL.path)
-            try await writer.start(sphericalHarmonicDegree: 0, binary: true, pointCount: points.count)
-            try await writer.write(points)
-            try await writer.close()
-
-            try imageData.write(to: imageURL, options: [.atomic])
+            try fileManager.copyItem(at: sourceSplatURL, to: plyURL)
+            try fileManager.copyItem(at: sourceImageURL, to: imageURL)
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             try encoder.encode(metadata).write(to: jsonURL, options: [.atomic])
@@ -1144,10 +2129,89 @@ final class AppState: ObservableObject {
         }.value
     }
 
+    private final class BlockingAsyncResult<Value>: @unchecked Sendable {
+        private let semaphore = DispatchSemaphore(value: 0)
+        private let lock = NSLock()
+        private var result: Result<Value, Error>?
+
+        func complete(_ newResult: Result<Value, Error>) {
+            lock.lock()
+            result = newResult
+            lock.unlock()
+            semaphore.signal()
+        }
+
+        func wait() throws -> Value {
+            semaphore.wait()
+            lock.lock()
+            let value = result
+            lock.unlock()
+            return try value!.get()
+        }
+    }
+
+    private static func waitForAsync<Value>(_ operation: @escaping () async throws -> Value) throws -> Value {
+        let result = BlockingAsyncResult<Value>()
+        Task(priority: .userInitiated) {
+            do {
+                result.complete(.success(try await operation()))
+            } catch {
+                result.complete(.failure(error))
+            }
+        }
+        return try result.wait()
+    }
+
+    private static func loadSharpModel(
+        modelURL: URL,
+        backend: SharpComputeBackend,
+        timeoutSeconds: TimeInterval?
+    ) throws -> SharpModel {
+        guard let timeoutSeconds, timeoutSeconds > 0 else {
+            return try SharpModel(modelURL: modelURL, backend: backend)
+        }
+
+        let semaphore = DispatchSemaphore(value: 0)
+        let lock = NSLock()
+        var result: Result<SharpModel, Error>?
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let loadResult = Result {
+                try SharpModel(modelURL: modelURL, backend: backend)
+            }
+            lock.lock()
+            result = loadResult
+            lock.unlock()
+            semaphore.signal()
+        }
+
+        let timeoutMilliseconds = Int((timeoutSeconds * 1000).rounded())
+        if semaphore.wait(timeout: .now() + .milliseconds(timeoutMilliseconds)) == .timedOut {
+            let seconds = String(format: "%.0f", timeoutSeconds)
+            print("⏱️ [OpenReshot][AutoMem] MLModel load timeout after \(seconds)s: model=\(modelURL.lastPathComponent), backend=\(backend.rawValue)")
+            throw err("MLModel load timed out after \(seconds)s for \(modelURL.lastPathComponent) with \(backend.rawValue)")
+        }
+
+        lock.lock()
+        let value = result
+        lock.unlock()
+        return try value!.get()
+    }
+
+    private static func makeTemporaryPreviewSplatURL() throws -> URL {
+        let fileManager = FileManager.default
+        let directory = fileManager.temporaryDirectory
+            .appendingPathComponent("OpenReshotScene-\(UUID().uuidString)", isDirectory: true)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory.appendingPathComponent("scene.ply")
+    }
+
     private func persistReshotCache(
-        points: [SplatPoint],
+        splatURL: URL,
+        splatCount: Int,
         sourceImage: UIImage,
         sourceSignature: String,
+        modelSelection: OpenReshotModelSelection,
         quality: RenderQuality,
         focus: Float,
         focalPixels: Float,
@@ -1155,23 +2219,30 @@ final class AppState: ObservableObject {
         height: Int,
         taskID: UUID
     ) {
-        Task { [weak self, points, sourceImage, sourceSignature, quality] in
+        Task { [weak self, splatURL, splatCount, sourceImage, sourceSignature, modelSelection, quality] in
             do {
                 let item = try await ReshotCacheStore.save(
-                    points: points,
+                    splatURL: splatURL,
+                    splatCount: splatCount,
                     sourceImage: sourceImage,
                     sourceSignature: sourceSignature,
+                    modelSelection: modelSelection,
                     quality: quality,
                     focus: focus,
                     focalPixels: focalPixels,
                     width: width,
                     height: height
                 )
-                await MainActor.run {
-                    guard self?.activeTaskID == taskID else { return }
-                    self?.activeCacheItemID = item.id
-                    self?.galleryItems.removeAll { $0.id == item.id }
-                    self?.galleryItems.insert(item, at: 0)
+                await MainActor.run { [weak self] in
+                    guard let self, self.activeTaskID == taskID else { return }
+                    let splatURL = ReshotCacheStore.splatURL(for: item)
+                    let sourceURL = ReshotCacheStore.sourceURL(for: item)
+                    self.activeCacheItemID = item.id
+                    self.currentPreviewSplatURL = splatURL
+                    self.currentPreviewSourceURL = sourceURL
+                    self.hasExportablePreview = splatURL != nil && sourceURL != nil
+                    self.galleryItems.removeAll { $0.id == item.id }
+                    self.galleryItems.insert(item, at: 0)
                     print("💾 [OpenReshot] cached reconstruction \(item.id)")
                 }
             } catch {
@@ -1180,10 +2251,14 @@ final class AppState: ObservableObject {
         }
     }
 
-    private static func sourceSignature(for image: UIImage) -> String? {
-        guard let data = image.pngData() else { return nil }
+    private static func sourceSignature(for data: Data) -> String {
         let digest = SHA256.hash(data: data)
-        return digest.map { String(format: "%02x", $0) }.joined()
+        return "coreml-strided-output-v2-" + digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func previewSourceImageName(for url: URL) -> String {
+        let ext = url.pathExtension.isEmpty ? "jpg" : url.pathExtension
+        return "OpenReshotPreview.\(ext)"
     }
 
     @MainActor
@@ -2104,6 +3179,7 @@ struct ContentView: View {
                let url = Bundle.main.url(forResource: "koala", withExtension: "png"),
                let data = try? Data(contentsOf: url), let img = UIImage(data: data) {
                 print("🧪 [OpenReshot] autotest: reconstructing bundled koala.png")
+                OpenReshotMemoryProbe.log("autotest before reconstruct")
                 app.reconstruct(img, sourceData: data)
             } else {
                 app.loadDemoSceneIfNeeded()
@@ -2113,39 +3189,57 @@ struct ContentView: View {
             guard let item else { return }
             print("📸 [OpenReshot] photo picked")
             photoLoadTask?.cancel()
-            let taskID = app.beginImageLoadTask()
-            showDragHint = false
-            saveToastVisible = false
-            comparingResult = false
-            comparisonWipePosition = 0.5
-            shutterMenuExpanded = false
-            previewActionExpanded = false
-            resultMenuExpanded = false
-            frameStartPending = false
-            resultReplacementPending = false
-            photoLoadTask = Task { @MainActor in
+            let taskID = UUID()
+            photoLoadTask = Task {
+                await MainActor.run {
+                    _ = app.beginImageLoadTask(taskID: taskID)
+                    showDragHint = false
+                    saveToastVisible = false
+                    comparingResult = false
+                    comparisonWipePosition = 0.5
+                    shutterMenuExpanded = false
+                    previewActionExpanded = false
+                    resultMenuExpanded = false
+                    frameStartPending = false
+                    resultReplacementPending = false
+                }
                 do {
                     guard let data = try await item.loadTransferable(type: Data.self) else {
-                        guard app.isCurrentTask(taskID), !Task.isCancelled else { return }
+                        let isCurrent = await MainActor.run { app.isCurrentTask(taskID) }
+                        guard isCurrent, !Task.isCancelled else { return }
                         print("❌ [OpenReshot] loadTransferable returned nil")
-                        app.failTaskIfCurrent(taskID)
+                        await MainActor.run { app.failTaskIfCurrent(taskID) }
                         return
                     }
-                    guard app.isCurrentTask(taskID), !Task.isCancelled else { return }
+                    OpenReshotMemoryProbe.log("after photo data load")
+                    let isCurrent = await MainActor.run { app.isCurrentTask(taskID) }
+                    guard isCurrent, !Task.isCancelled else { return }
                     print("✅ [OpenReshot] loaded \(data.count) bytes")
-                    guard let img = UIImage(data: data) else {
-                        guard app.isCurrentTask(taskID), !Task.isCancelled else { return }
+                    OpenReshotDiagnostics.logSourceData(data, label: "picked photo")
+                    guard let img = autoreleasepool(invoking: {
+                        SharpModel.downsampledImage(from: data) ??
+                        UIImage(data: data).map { SharpModel.normalized($0, maxLongEdge: SharpModel.workingImageMaxLongEdge) }
+                    }) else {
+                        let isCurrent = await MainActor.run { app.isCurrentTask(taskID) }
+                        guard isCurrent, !Task.isCancelled else { return }
                         print("❌ [OpenReshot] UIImage(data:) failed")
-                        app.failTaskIfCurrent(taskID)
+                        await MainActor.run { app.failTaskIfCurrent(taskID) }
                         return
                     }
-                    app.reconstruct(img, sourceData: data, taskID: taskID)
+                    print("🖼️ [OpenReshot] decoded working image \(SharpModel.pixelSizeDescription(img))")
+                    OpenReshotDiagnostics.logUIImage(img, label: "picked decoded")
+                    OpenReshotMemoryProbe.log("after photo UIImage decode")
+                    await MainActor.run {
+                        guard app.isCurrentTask(taskID), !Task.isCancelled else { return }
+                        app.processPickedImage(img, sourceData: data, taskID: taskID)
+                    }
                 } catch is CancellationError {
                     return
                 } catch {
-                    guard app.isCurrentTask(taskID), !Task.isCancelled else { return }
+                    let isCurrent = await MainActor.run { app.isCurrentTask(taskID) }
+                    guard isCurrent, !Task.isCancelled else { return }
                     print("❌ [OpenReshot] load error: \(error)")
-                    app.failTaskIfCurrent(taskID)
+                    await MainActor.run { app.failTaskIfCurrent(taskID) }
                 }
             }
         }
@@ -2295,7 +3389,7 @@ struct ContentView: View {
             .frame(width: size.width, height: size.height)
 
             bottomActionLayer(size: size, scale: scale) {
-                PhotosPicker(selection: $pickerItem, matching: .images) {
+                PhotosPicker(selection: $pickerItem, matching: .images, preferredItemEncoding: .current) {
                     emptyBottomAction(scale: scale)
                 }
                 .buttonStyle(FluidPressButtonStyle(pressedScale: 0.94))
@@ -2663,7 +3757,7 @@ struct ContentView: View {
         case .missingModel:
             openSettings()
         case .reconstruction, nil:
-            guard app.modelStore.activeModelURL() != nil else {
+            guard app.activeModelURL() != nil else {
                 openSettings()
                 return
             }
@@ -2682,7 +3776,7 @@ struct ContentView: View {
         case .missingModel:
             return "下载模型".localized
         case .reconstruction, nil:
-            return app.modelStore.activeModelURL() == nil ? "下载模型".localized : "重试构建空间".localized
+            return app.activeModelURL() == nil ? "下载模型".localized : "重试构建空间".localized
         }
     }
 
@@ -2697,7 +3791,7 @@ struct ContentView: View {
         case .missingModel:
             return "arrow.down"
         case .reconstruction, nil:
-            guard app.modelStore.activeModelURL() != nil else {
+            guard app.activeModelURL() != nil else {
                 return "arrow.down"
             }
             return "arrow.clockwise"
@@ -2715,7 +3809,7 @@ struct ContentView: View {
         case .missingModel:
             return "下载模型".localized
         case .reconstruction, nil:
-            guard app.modelStore.activeModelURL() != nil else {
+            guard app.activeModelURL() != nil else {
                 return "下载模型".localized
             }
             return "重试".localized
@@ -2748,7 +3842,7 @@ struct ContentView: View {
         case .missingModel:
             return "模型".localized
         case .reconstruction, nil:
-            guard app.modelStore.activeModelURL() != nil else {
+            guard app.activeModelURL() != nil else {
                 return "模型".localized
             }
             return "设置".localized
@@ -2762,7 +3856,7 @@ struct ContentView: View {
         case .missingModel:
             return "arrow.down.circle"
         case .reconstruction, nil:
-            guard app.modelStore.activeModelURL() != nil else {
+            guard app.activeModelURL() != nil else {
                 return "arrow.down.circle"
             }
             return "gearshape"
@@ -2780,7 +3874,7 @@ struct ContentView: View {
             openSettings(focusGeminiKey: true)
             return
         }
-        if app.processFailureKind == .reconstruction, app.modelStore.activeModelURL() == nil {
+        if app.processFailureKind == .reconstruction, app.activeModelURL() == nil {
             openSettings()
             return
         }
@@ -3556,6 +4650,9 @@ struct ContentView: View {
         case .preview:
             return ""
         case .inferring:
+            if app.memoryAutoTestRunning || !app.memoryAutoTestStatus.isEmpty {
+                return app.memoryAutoTestStatus.localized
+            }
             return "构建空间".localized
         case .failed:
             return failedRetryLabel
@@ -4182,7 +5279,7 @@ struct ContentView: View {
                 .accessibilityLabel("保存生成照片")
                 .buttonStyle(FluidPressButtonStyle())
             } else {
-                PhotosPicker(selection: $pickerItem, matching: .images) {
+                PhotosPicker(selection: $pickerItem, matching: .images, preferredItemEncoding: .current) {
                     plainUtilityIcon(systemName: "plus")
                 }
                 .accessibilityLabel("选择照片")
@@ -4534,6 +5631,8 @@ struct SettingsView: View {
                                 .padding(.bottom, 34)
 
                             modelSection
+                            memoryTestSection
+                                .padding(.top, 34)
                             qualitySection
                                 .padding(.top, 34)
                             if shouldShowPreviewExportSection {
@@ -4767,6 +5866,150 @@ struct SettingsView: View {
                     .strokeBorder(modelStatusForeground.opacity(0.22), lineWidth: 1)
             )
             .contentShape(Capsule())
+    }
+
+    private var memoryTestSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            sectionLabel("内存测试")
+
+            settingsCard {
+                VStack(spacing: 0) {
+                    Toggle(isOn: $app.memoryAutoTestEnabled) {
+                        settingsToggleLabel(title: "自动轮测",
+                                            caption: memoryAutoTestCaption,
+                                            systemImage: "speedometer")
+                    }
+                    .toggleStyle(.switch)
+                    .tint(SettingsSheetStyle.accent)
+                    .padding(.horizontal, 18)
+                    .frame(minHeight: 66)
+
+                    divider
+
+                    Menu {
+                        ForEach(OpenReshotMemoryTestProfile.allCases) { profile in
+                            Button {
+                                app.memoryTestProfile = profile
+                            } label: {
+                                Label(profile.title, systemImage: app.memoryTestProfile == profile ? "checkmark" : profile.systemImage)
+                            }
+                        }
+                    } label: {
+                        settingsChoiceRow(title: "测试档位",
+                                          caption: app.memoryTestProfile.subtitle,
+                                          value: app.memoryTestProfile.title,
+                                          systemImage: app.memoryTestProfile.systemImage)
+                    }
+                    .buttonStyle(.plain)
+
+                    divider
+
+                    Menu {
+                        ForEach(OpenReshotModelSelection.allCases) { selection in
+                            let available = app.modelSelectionIsAvailable(selection)
+                            Button {
+                                app.modelSelection = selection
+                            } label: {
+                                Label(available ? selection.title : "\(selection.title) · 未内置",
+                                      systemImage: app.modelSelection == selection ? "checkmark" : selection.systemImage)
+                            }
+                            .disabled(!available)
+                        }
+                    } label: {
+                        settingsChoiceRow(title: "模型包",
+                                          caption: modelSelectionCaption,
+                                          value: app.modelSelection.title,
+                                          systemImage: app.modelSelection.systemImage,
+                                          isWarning: !app.modelSelectionIsAvailable(app.modelSelection))
+                    }
+                    .buttonStyle(.plain)
+
+                }
+            }
+        }
+    }
+
+    private var modelSelectionCaption: String {
+        if app.modelSelectionIsAvailable(app.modelSelection) {
+            return app.modelSelection.subtitle
+        }
+        return "当前模型包未内置"
+    }
+
+    private var memoryAutoTestCaption: String {
+        if app.memoryAutoTestRunning {
+            return app.memoryAutoTestStatus.isEmpty ? "运行中" : app.memoryAutoTestStatus
+        }
+        if app.memoryAutoTestEnabled {
+            let caseNames = OpenReshotMemoryAutoTestCase.defaultCases(for: app.modelSelection).map(\.title).joined(separator: "、")
+            return "选图后自动跑 \(caseNames)"
+        }
+        if !app.memoryAutoTestStatus.isEmpty {
+            return app.memoryAutoTestStatus
+        }
+        return "关闭时选图直接重建预览"
+    }
+
+    private func settingsToggleLabel(title: String, caption: String, systemImage: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: systemImage)
+                .font(.system(size: 15, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(SettingsSheetStyle.accent.opacity(0.82))
+                .frame(width: 22)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title.localized)
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundStyle(SettingsSheetStyle.primaryText)
+
+                Text(caption.localized)
+                    .font(.system(size: 12, weight: .regular, design: .rounded))
+                    .foregroundStyle(SettingsSheetStyle.secondaryText)
+                    .lineLimit(2)
+            }
+        }
+    }
+
+    private func settingsChoiceRow(title: String,
+                                   caption: String,
+                                   value: String,
+                                   systemImage: String,
+                                   isWarning: Bool = false) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: systemImage)
+                .font(.system(size: 15, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(isWarning ? SettingsSheetStyle.destructiveText : SettingsSheetStyle.accent.opacity(0.82))
+                .frame(width: 22)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title.localized)
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundStyle(SettingsSheetStyle.primaryText)
+
+                Text(caption.localized)
+                    .font(.system(size: 12, weight: .regular, design: .rounded))
+                    .foregroundStyle(isWarning ? SettingsSheetStyle.destructiveText.opacity(0.88) : SettingsSheetStyle.secondaryText)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 12)
+
+            HStack(spacing: 6) {
+                Text(value.localized)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(isWarning ? SettingsSheetStyle.destructiveText : SettingsSheetStyle.primaryText)
+                    .lineLimit(1)
+
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(SettingsSheetStyle.tertiaryText)
+            }
+        }
+        .padding(.horizontal, 18)
+        .frame(height: 62)
+        .contentShape(Rectangle())
     }
 
     private var qualitySection: some View {
@@ -5234,6 +6477,7 @@ struct MetalView: UIViewRepresentable {
         v.isPaused = true
         v.enableSetNeedsDisplay = true
         v.contentScaleFactor = app.quality.renderScale(memoryGB: Self.memoryGB)
+        OpenReshotDiagnostics.logMetalView(label: "MetalView make", renderScale: app.quality.renderScale(memoryGB: Self.memoryGB), frameRate: app.quality.preferredFrameRate, view: v)
         if let r = ReshootRenderer(v) {
             app.attachRenderer(r)
             print("✅ [OpenReshot] MetalSplatter renderer ready")

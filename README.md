@@ -68,7 +68,7 @@ WWDC 2026 之后，空间照片和可变视角照片成为 iOS 27 时代很有�
 ### 2026-06-11
 
 - iOS 主流程已完成：选图、照片动效、当前角度重构、结果保存。
-- iOS 默认打包为空壳 App，不内置 1GB+ 模型；首次使用可在设置里从 ModelScope 下载 Core ML 模型，Hugging Face 作为备用镜像。
+- iOS 可走轻量下载模型路线；如果本地存在 `ios/OpenReshot/SHARP.mlpackage`，XcodeGen 会把它作为内置模型打进 App。
 - 查看器动效已补齐 glow、sheen、cover fade 和多彩缺失区域处理。
 - 底部操作区改成更克制的 PhoneClaw 同系风格，按钮直接融合在背景里。
 - 模型仓库已发布到 [ModelScope](https://modelscope.cn/models/kilywei/openreshoot-sharp-coreml) 和 [Hugging Face](https://huggingface.co/kellyxiaowei/openreshoot-sharp-coreml)，可直接查看 `SHARP.mlpackage` 源文件。
@@ -93,7 +93,7 @@ xcodegen generate
 open OpenReshot.xcodeproj
 ```
 
-在 Xcode 中选择 `OpenReshot` target，配置签名 Team，选择真机运行。默认构建不包含 `SHARP.mlpackage`，App 包体积保持轻量。
+在 Xcode 中选择 `OpenReshot` target，配置签名 Team，选择真机运行。如果本地存在 `ios/OpenReshot/SHARP.mlpackage`，构建会内置该模型；否则 App 包体积保持轻量并在首次使用时下载模型。
 
 iOS 细节见 [ios/README.md](ios/README.md)。
 

@@ -1,6 +1,7 @@
 """Validate the Core ML model output matches PyTorch on a real image."""
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import numpy as np
@@ -12,10 +13,22 @@ from sharp.models import PredictorParams, create_predictor
 from sharp.utils import io as sio
 
 ROOT = Path(__file__).resolve().parents[1]
-W = 1536
+DEFAULT_WIDTH = 1536
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--mlpackage", type=Path, default=ROOT / "out" / "SHARP.mlpackage")
+    parser.add_argument("--image", type=Path, default=ROOT / "out" / "koala.png")
+    parser.add_argument("--width", type=int, default=DEFAULT_WIDTH)
+    return parser.parse_args()
+
+
+args = parse_args()
+W = args.width
 
 # --- preprocess a real image exactly like predict_image ---
-img, _, f_px = sio.load_rgb(ROOT / "out" / "koala.png")
+img, _, f_px = sio.load_rgb(args.image)
 H0, W0 = img.shape[:2]
 x = torch.from_numpy(img.copy()).float().permute(2, 0, 1) / 255.0
 x = F.interpolate(x[None], size=(W, W), mode="bilinear", align_corners=True)
@@ -31,7 +44,7 @@ ref_t = [ref.mean_vectors, ref.singular_values, ref.quaternions, ref.colors, ref
 names = ["mean", "sv", "quat", "color", "opacity"]
 
 # --- Core ML ---
-ml = ct.models.MLModel(str(ROOT / "out" / "SHARP.mlpackage"))
+ml = ct.models.MLModel(str(args.mlpackage), compute_units=ct.ComputeUnit.CPU_ONLY)
 out = ml.predict(
     {"image": x.numpy().astype(np.float32), "disparity_factor": disp.numpy().astype(np.float32)}
 )

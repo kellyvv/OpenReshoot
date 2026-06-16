@@ -1,6 +1,6 @@
 # OpenReshot iOS
 
-OpenReshot iOS 是原生 SwiftUI + Core ML + Metal 版本。默认打包为空壳 App，不把 1GB+ 的 SHARP 模型放进安装包；首次使用时在设置里下载模型，下载完成后在设备本机编译并运行。
+OpenReshot iOS 是原生 SwiftUI + Core ML + Metal 版本。默认可走轻量下载模型路线；如果本地存在 `OpenReshot/SHARP.mlpackage`，XcodeGen 会把它编进安装包作为内置模型。
 
 ## 要求
 
@@ -9,7 +9,7 @@ OpenReshot iOS 是原生 SwiftUI + Core ML + Metal 版本。默认打包为空�
 - iOS 18 或更新版本的 iPhone / iPad 真机。
 - 建议使用内存较大的设备，Pro / 8GB 内存机型更稳。
 
-普通 iOS 构建不需要本地 Python、Core ML 转换脚本，也不需要提前准备 `SHARP.mlpackage`。
+普通 iOS 构建不需要本地 Python、Core ML 转换脚本，也不需要提前准备 `SHARP.mlpackage`。需要测试内置 SDPA 模型时，先运行 `scripts/prepare_ios_model.sh` 生成本地模型包。
 
 ## 构建运行
 
@@ -19,7 +19,7 @@ xcodegen generate
 open OpenReshot.xcodeproj
 ```
 
-在 Xcode 中选择 `OpenReshot` target，配置签名 Team，选择真机运行。默认 target 会排除 `OpenReshot/SHARP.mlpackage`，所以 App 包体积保持轻量。
+在 Xcode 中选择 `OpenReshot` target，配置签名 Team，选择真机运行。如果 `OpenReshot/SHARP.mlpackage` 存在，它会作为资源编译成 app 内的 `SHARP.mlmodelc`；否则 App 包体积保持轻量，并在首次使用时下载模型。
 
 首次运行流程：
 
@@ -67,7 +67,7 @@ SHARP.mlpackage/
 OpenReshot/Models/SHARP.mlmodelc
 ```
 
-后续启动会优先使用已下载模型；没有下载模型时，设置页会显示未安装。
+后续启动会优先使用内置模型；没有内置模型时使用已下载模型；两者都不存在时，设置页会显示未安装。
 
 ## Gemini API Key
 
@@ -103,12 +103,14 @@ pip install -r requirements/requirements-ios.txt
 scripts/prepare_ios_model.sh
 ```
 
-这个流程会生成 `ios/OpenReshot/SHARP.mlpackage`。当前默认 `project.yml` 会把它从 target sources 里排除，避免打包进 App；如果你明确要内置模型，需要手动调整 XcodeGen 配置。
+这个流程会生成 `ios/OpenReshot/SHARP.mlpackage`。`project.yml` 会在该文件存在时把它作为可选 resource 编进 App；文件不存在时仍可生成轻量工程。
+
+App 设置页里的内存测试档位可直接切换 CPU、CPU 无 outputBackings、GPU、CPU+ANE 纯推理路径；每次选择后重新选同一张图即可在日志里对比 `Core ML prediction sampled peak`。
 
 ## 注意事项
 
 - 模型权重约 1.23 GiB，下载和编译都需要稳定网络、足够电量和足够存储空间。
-- SHARP 1536x1536 模型的 ViT activations 很吃内存，低内存设备可能失败或被系统终止。
+- SHARP 1536x1536 模型的 ViT activations 很吃内存，低内存设备需要重点对比 App 内的纯推理 backend / outputBackings 档位。
 - 当前运行时动效定位是固定画框照片视差，不是完整 3DGS 场景查看器。
 - iOS **重构** 步骤会使用用户保存的 Gemini API key 直接请求 Gemini。
 - OpenReshot 自有源码采用 Apache 2.0；Apple SHARP 上游源码和研究模型分别受 `docs/LICENSE_APPLE_SHARP`、`docs/LICENSE_MODEL` 约束。不要把研究模型当作商业分发资产使用。

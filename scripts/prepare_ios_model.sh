@@ -4,8 +4,44 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON_BIN="${PYTHON:-python3}"
 CHECKPOINT="$ROOT/model/sharp_2572gikvuh.pt"
-MLPACKAGE_OUT="$ROOT/out/SHARP.mlpackage"
-MLPACKAGE_IOS="$ROOT/ios/OpenReshot/SHARP.mlpackage"
+CONVERT_MODE="${OPENRESHOT_COREML_MODE:-sdpa}"
+COREML_WIDTH="${OPENRESHOT_COREML_WIDTH:-1536}"
+WEIGHT_COMPRESSION="${OPENRESHOT_WEIGHT_COMPRESSION:-none}"
+COMPRESSION_GRANULARITY="${OPENRESHOT_COMPRESSION_GRANULARITY:-per_channel}"
+COMPRESSION_BLOCK_SIZE="${OPENRESHOT_COMPRESSION_BLOCK_SIZE:-32}"
+FORCE_REBUILD="${FORCE:-0}"
+
+if ! [[ "$COREML_WIDTH" =~ ^[0-9]+$ ]] || [ "$COREML_WIDTH" -le 0 ]; then
+  echo "OPENRESHOT_COREML_WIDTH must be a positive integer, got: $COREML_WIDTH"
+  exit 1
+fi
+
+if [ -n "${OPENRESHOT_IOS_MODEL_NAME:-}" ]; then
+  IOS_MODEL_NAME="$OPENRESHOT_IOS_MODEL_NAME"
+elif [ "$COREML_WIDTH" = "1536" ]; then
+  IOS_MODEL_NAME="SHARP"
+else
+  IOS_MODEL_NAME="SHARP-$COREML_WIDTH"
+fi
+MLPACKAGE_IOS="$ROOT/ios/OpenReshot/$IOS_MODEL_NAME.mlpackage"
+
+if [ -n "${OPENRESHOT_BASE_MLPACKAGE_OUT:-}" ]; then
+  BASE_MLPACKAGE_OUT="$OPENRESHOT_BASE_MLPACKAGE_OUT"
+elif [ "$COREML_WIDTH" = "1536" ]; then
+  BASE_MLPACKAGE_OUT="$ROOT/out/SHARP-$CONVERT_MODE.mlpackage"
+else
+  BASE_MLPACKAGE_OUT="$ROOT/out/SHARP-$CONVERT_MODE-${COREML_WIDTH}.mlpackage"
+fi
+
+if [ "$WEIGHT_COMPRESSION" = "none" ]; then
+  MLPACKAGE_OUT="${OPENRESHOT_MLPACKAGE_OUT:-$BASE_MLPACKAGE_OUT}"
+elif [ -n "${OPENRESHOT_MLPACKAGE_OUT:-}" ]; then
+  MLPACKAGE_OUT="$OPENRESHOT_MLPACKAGE_OUT"
+elif [ "$COREML_WIDTH" = "1536" ]; then
+  MLPACKAGE_OUT="$ROOT/out/SHARP-$CONVERT_MODE-$WEIGHT_COMPRESSION.mlpackage"
+else
+  MLPACKAGE_OUT="$ROOT/out/SHARP-$CONVERT_MODE-${COREML_WIDTH}-$WEIGHT_COMPRESSION.mlpackage"
+fi
 
 mkdir -p "$ROOT/model" "$ROOT/out" "$ROOT/ios/OpenReshot"
 
@@ -23,18 +59,44 @@ else
   echo "[1/3] checkpoint already exists."
 fi
 
-if [ ! -d "$MLPACKAGE_OUT" ]; then
-  echo "[2/3] converting reconstruction model to Core ML. This can take a while..."
-  "$PYTHON_BIN" "$ROOT/scripts/coreml_convert.py"
+if [ "$FORCE_REBUILD" = "1" ] || [ ! -d "$BASE_MLPACKAGE_OUT" ]; then
+  echo "[2/4] converting reconstruction model to Core ML ($CONVERT_MODE, ${COREML_WIDTH}x${COREML_WIDTH}). This can take a while..."
+  CONVERT_ARGS=(--mode "$CONVERT_MODE" --width "$COREML_WIDTH" --output "$BASE_MLPACKAGE_OUT")
+  if [ "$FORCE_REBUILD" = "1" ]; then
+    CONVERT_ARGS+=(--force)
+  fi
+  "$PYTHON_BIN" "$ROOT/scripts/coreml_convert.py" "${CONVERT_ARGS[@]}"
 else
-  echo "[2/3] Core ML package already exists."
+  echo "[2/4] Core ML base package already exists."
 fi
 
-if [ ! -d "$MLPACKAGE_IOS" ]; then
-  echo "[3/3] copying Core ML package into the iOS target..."
+if [ "$WEIGHT_COMPRESSION" = "none" ]; then
+  echo "[3/4] weight compression disabled."
+else
+  if [ "$FORCE_REBUILD" = "1" ] || [ ! -d "$MLPACKAGE_OUT" ]; then
+    echo "[3/4] applying Core ML weight compression ($WEIGHT_COMPRESSION). This can take a while..."
+    COMPRESS_ARGS=(
+      --input "$BASE_MLPACKAGE_OUT"
+      --output "$MLPACKAGE_OUT"
+      --weight-compression "$WEIGHT_COMPRESSION"
+      --compression-granularity "$COMPRESSION_GRANULARITY"
+      --compression-block-size "$COMPRESSION_BLOCK_SIZE"
+    )
+    if [ "$FORCE_REBUILD" = "1" ]; then
+      COMPRESS_ARGS+=(--force)
+    fi
+    "$PYTHON_BIN" "$ROOT/scripts/coreml_compress.py" "${COMPRESS_ARGS[@]}"
+  else
+    echo "[3/4] compressed Core ML package already exists."
+  fi
+fi
+
+if [ "$FORCE_REBUILD" = "1" ] || [ ! -d "$MLPACKAGE_IOS" ]; then
+  echo "[4/4] copying Core ML package into the iOS target as $IOS_MODEL_NAME.mlpackage..."
+  rm -rf "$MLPACKAGE_IOS"
   cp -R "$MLPACKAGE_OUT" "$MLPACKAGE_IOS"
 else
-  echo "[3/3] iOS Core ML package already exists."
+  echo "[4/4] iOS Core ML package already exists."
 fi
 
 echo

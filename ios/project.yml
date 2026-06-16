@@ -20,6 +20,59 @@ schemes:
       config: Debug
     archive:
       config: Release
+  OpenReshot-Mem-CPU:
+    build:
+      targets:
+        OpenReshot: all
+    run:
+      config: Debug
+      commandLineArguments:
+        "-openreshotNoCache": true
+        "-openreshotNoRenderer": true
+        "-openreshotNoSubjectMask": true
+        "-openreshotCPUOnlyInference": true
+    archive:
+      config: Release
+  OpenReshot-Mem-CPU-NoBackings:
+    build:
+      targets:
+        OpenReshot: all
+    run:
+      config: Debug
+      commandLineArguments:
+        "-openreshotNoCache": true
+        "-openreshotNoRenderer": true
+        "-openreshotNoSubjectMask": true
+        "-openreshotCPUOnlyInference": true
+        "-openreshotNoOutputBackings": true
+    archive:
+      config: Release
+  OpenReshot-Mem-GPU:
+    build:
+      targets:
+        OpenReshot: all
+    run:
+      config: Debug
+      commandLineArguments:
+        "-openreshotNoCache": true
+        "-openreshotNoRenderer": true
+        "-openreshotNoSubjectMask": true
+        "-openreshotFastGPUInference": true
+    archive:
+      config: Release
+  OpenReshot-Mem-CPUANE:
+    build:
+      targets:
+        OpenReshot: all
+    run:
+      config: Debug
+      commandLineArguments:
+        "-openreshotNoCache": true
+        "-openreshotNoRenderer": true
+        "-openreshotNoSubjectMask": true
+        "-openreshotCPUAndNeuralEngine": true
+    archive:
+      config: Release
 
 targets:
   OpenReshot:
@@ -35,6 +88,21 @@ targets:
         buildPhase: resources
       - path: OpenReshot/DemoFLOW.ply
         buildPhase: resources
+      - path: OpenReshot/SHARP.mlpackage
+        buildPhase: resources
+        optional: true
+      - path: ../out/SHARP-sdpa-1280.mlpackage
+        buildPhase: resources
+        optional: true
+      - path: ../out/SHARP-sdpa-1024.mlpackage
+        buildPhase: resources
+        optional: true
+      - path: ../out/SHARP-sdpa-896.mlpackage
+        buildPhase: resources
+        optional: true
+      - path: ../out/SHARP-sdpa-768.mlpackage
+        buildPhase: resources
+        optional: true
     info:
       path: OpenReshot/Info.plist
       properties:
