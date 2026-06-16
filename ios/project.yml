@@ -81,33 +81,23 @@ targets:
     sources:
       - path: OpenReshot
         excludes:
-          - SHARP.mlpackage
+          - "*.mlpackage"
+          - "**/*.mlpackage"
+          - "*.mlmodel"
+          - "**/*.mlmodel"
+          - "*.mlmodelc"
+          - "**/*.mlmodelc"
           - DemoFLOW.png
           - DemoFLOW.ply
       - path: OpenReshot/DemoFLOW.png
         buildPhase: resources
       - path: OpenReshot/DemoFLOW.ply
         buildPhase: resources
-      - path: OpenReshot/SHARP.mlpackage
-        buildPhase: resources
-        optional: true
-      - path: ../out/SHARP-sdpa-1280.mlpackage
-        buildPhase: resources
-        optional: true
-      - path: ../out/SHARP-sdpa-1024.mlpackage
-        buildPhase: resources
-        optional: true
-      - path: ../out/SHARP-sdpa-896.mlpackage
-        buildPhase: resources
-        optional: true
-      - path: ../out/SHARP-sdpa-768.mlpackage
-        buildPhase: resources
-        optional: true
     info:
       path: OpenReshot/Info.plist
       properties:
         CFBundleShortVersionString: "1.0"
-        CFBundleVersion: "7"
+        CFBundleVersion: "9"
         CFBundleDisplayName: Reshot
         NSPhotoLibraryUsageDescription: "Pick a photo to turn into a 3D parallax view."
         NSPhotoLibraryAddUsageDescription: "Save reconstructed photos, motion videos, GIFs, and Live Photos to your library."

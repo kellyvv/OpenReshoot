@@ -16,15 +16,6 @@ if ! [[ "$COREML_WIDTH" =~ ^[0-9]+$ ]] || [ "$COREML_WIDTH" -le 0 ]; then
   exit 1
 fi
 
-if [ -n "${OPENRESHOT_IOS_MODEL_NAME:-}" ]; then
-  IOS_MODEL_NAME="$OPENRESHOT_IOS_MODEL_NAME"
-elif [ "$COREML_WIDTH" = "1536" ]; then
-  IOS_MODEL_NAME="SHARP"
-else
-  IOS_MODEL_NAME="SHARP-$COREML_WIDTH"
-fi
-MLPACKAGE_IOS="$ROOT/ios/OpenReshot/$IOS_MODEL_NAME.mlpackage"
-
 if [ -n "${OPENRESHOT_BASE_MLPACKAGE_OUT:-}" ]; then
   BASE_MLPACKAGE_OUT="$OPENRESHOT_BASE_MLPACKAGE_OUT"
 elif [ "$COREML_WIDTH" = "1536" ]; then
@@ -43,7 +34,7 @@ else
   MLPACKAGE_OUT="$ROOT/out/SHARP-$CONVERT_MODE-${COREML_WIDTH}-$WEIGHT_COMPRESSION.mlpackage"
 fi
 
-mkdir -p "$ROOT/model" "$ROOT/out" "$ROOT/ios/OpenReshot"
+mkdir -p "$ROOT/model" "$ROOT/out"
 
 if ! "$PYTHON_BIN" -c "import coremltools" >/dev/null 2>&1; then
   echo "coremltools is missing."
@@ -60,21 +51,21 @@ else
 fi
 
 if [ "$FORCE_REBUILD" = "1" ] || [ ! -d "$BASE_MLPACKAGE_OUT" ]; then
-  echo "[2/4] converting reconstruction model to Core ML ($CONVERT_MODE, ${COREML_WIDTH}x${COREML_WIDTH}). This can take a while..."
+  echo "[2/3] converting reconstruction model to Core ML ($CONVERT_MODE, ${COREML_WIDTH}x${COREML_WIDTH}). This can take a while..."
   CONVERT_ARGS=(--mode "$CONVERT_MODE" --width "$COREML_WIDTH" --output "$BASE_MLPACKAGE_OUT")
   if [ "$FORCE_REBUILD" = "1" ]; then
     CONVERT_ARGS+=(--force)
   fi
   "$PYTHON_BIN" "$ROOT/scripts/coreml_convert.py" "${CONVERT_ARGS[@]}"
 else
-  echo "[2/4] Core ML base package already exists."
+  echo "[2/3] Core ML base package already exists."
 fi
 
 if [ "$WEIGHT_COMPRESSION" = "none" ]; then
-  echo "[3/4] weight compression disabled."
+  echo "[3/3] weight compression disabled."
 else
   if [ "$FORCE_REBUILD" = "1" ] || [ ! -d "$MLPACKAGE_OUT" ]; then
-    echo "[3/4] applying Core ML weight compression ($WEIGHT_COMPRESSION). This can take a while..."
+    echo "[3/3] applying Core ML weight compression ($WEIGHT_COMPRESSION). This can take a while..."
     COMPRESS_ARGS=(
       --input "$BASE_MLPACKAGE_OUT"
       --output "$MLPACKAGE_OUT"
@@ -87,20 +78,16 @@ else
     fi
     "$PYTHON_BIN" "$ROOT/scripts/coreml_compress.py" "${COMPRESS_ARGS[@]}"
   else
-    echo "[3/4] compressed Core ML package already exists."
+    echo "[3/3] compressed Core ML package already exists."
   fi
 fi
 
-if [ "$FORCE_REBUILD" = "1" ] || [ ! -d "$MLPACKAGE_IOS" ]; then
-  echo "[4/4] copying Core ML package into the iOS target as $IOS_MODEL_NAME.mlpackage..."
-  rm -rf "$MLPACKAGE_IOS"
-  cp -R "$MLPACKAGE_OUT" "$MLPACKAGE_IOS"
-else
-  echo "[4/4] iOS Core ML package already exists."
-fi
-
 echo
-echo "Ready. Next:"
+echo "Ready. Core ML package:"
+echo "  $MLPACKAGE_OUT"
+echo
+echo "App builds stay model-empty; users download the model inside the app."
+echo "Next:"
 echo "  cd ios"
 echo "  xcodegen generate"
 echo "  open OpenReshot.xcodeproj"

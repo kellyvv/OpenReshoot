@@ -113,7 +113,6 @@
 "重试" = "Retry";
 "重试构建空间" = "Retry building space";
 "镜头" = "Lens";
-"随 App 内置可用" = "Available in the app";
 "需要下载模型后构建空间" = "Download the model before building space";
 "需要输入 API Key 后拍摄" = "Enter an API key before shooting";
 "首次重构前需要下载" = "Download before first reconstruction";

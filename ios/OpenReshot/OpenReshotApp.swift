@@ -113,30 +113,16 @@ enum OpenReshotMemoryTestProfile: String, CaseIterable, Identifiable {
 
 enum OpenReshotModelSelection: String, CaseIterable, Identifiable {
     case automatic
-    case bundled1536
-    case bundled1280
-    case bundled1024
-    case bundled896
-    case bundled768
-    case bundledInt4
-    case bundledPalettize4
     case downloaded
 
     static let defaultsKey = "OpenReshot.modelSelection"
-    static let allCases: [OpenReshotModelSelection] = [.automatic, .bundled1536, .bundled1280, .bundled1024, .bundled896, .bundled768, .downloaded]
+    static let allCases: [OpenReshotModelSelection] = [.automatic, .downloaded]
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .automatic: return "自动"
-        case .bundled1536: return "SHARP 1536"
-        case .bundled1280: return "SHARP 1280"
-        case .bundled1024: return "SHARP 1024"
-        case .bundled896: return "SHARP 896"
-        case .bundled768: return "SHARP 768"
-        case .bundledInt4: return "SHARP Int4"
-        case .bundledPalettize4: return "SHARP Pal4"
         case .downloaded: return "已下载"
         }
     }
@@ -144,21 +130,7 @@ enum OpenReshotModelSelection: String, CaseIterable, Identifiable {
     var subtitle: String {
         switch self {
         case .automatic:
-            return "按固定顺序优先使用内置 1536 模型"
-        case .bundled1536:
-            return "内置 fp16 SHARP.mlpackage"
-        case .bundled1280:
-            return "内置 fp16 1280 分辨率包"
-        case .bundled1024:
-            return "内置 fp16 1024 分辨率包"
-        case .bundled896:
-            return "内置 fp16 896 分辨率候选包"
-        case .bundled768:
-            return "内置 fp16 768 分辨率候选包"
-        case .bundledInt4:
-            return "内置 int4 权重量化包"
-        case .bundledPalettize4:
-            return "内置 4-bit palettize 权重量化包"
+            return "使用用户下载的 SHARP 模型"
         case .downloaded:
             return "Application Support 里的下载模型"
         }
@@ -167,44 +139,7 @@ enum OpenReshotModelSelection: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .automatic: return "wand.and.stars"
-        case .bundled1536: return "shippingbox"
-        case .bundled1280: return "rectangle.compress.vertical"
-        case .bundled1024: return "rectangle.compress.vertical"
-        case .bundled896: return "rectangle.compress.vertical"
-        case .bundled768: return "rectangle.compress.vertical"
-        case .bundledInt4: return "square.grid.3x3.square"
-        case .bundledPalettize4: return "circle.hexagongrid"
         case .downloaded: return "arrow.down.circle"
-        }
-    }
-
-    var bundledResourceName: String? {
-        switch self {
-        case .automatic, .downloaded:
-            return nil
-        case .bundled1536:
-            return "SHARP"
-        case .bundled1280:
-            return "SHARP-sdpa-1280"
-        case .bundled1024:
-            return "SHARP-sdpa-1024"
-        case .bundled896:
-            return "SHARP-sdpa-896"
-        case .bundled768:
-            return "SHARP-sdpa-768"
-        case .bundledInt4:
-            return "SHARP-sdpa-int4"
-        case .bundledPalettize4:
-            return "SHARP-sdpa-palettize4"
-        }
-    }
-
-    var usesQuantizedWeights: Bool {
-        switch self {
-        case .bundledInt4, .bundledPalettize4:
-            return true
-        case .automatic, .bundled1536, .bundled1280, .bundled1024, .bundled896, .bundled768, .downloaded:
-            return false
         }
     }
 
@@ -214,7 +149,7 @@ enum OpenReshotModelSelection: String, CaseIterable, Identifiable {
                   let selection = OpenReshotModelSelection(rawValue: rawValue) else {
                 return .automatic
             }
-            if selection.usesQuantizedWeights || !Self.allCases.contains(selection) {
+            if !Self.allCases.contains(selection) {
                 return .automatic
             }
             return selection
@@ -287,14 +222,6 @@ enum OpenReshotDebugFlags {
         arguments.contains("-openreshotFrequentReshape")
     }
 
-    static var preferBundledModel: Bool {
-        arguments.contains("-openreshotPreferBundledModel")
-    }
-
-    static var preferDownloadedModel: Bool {
-        arguments.contains("-openreshotPreferDownloadedModel")
-    }
-
     static var memoryLogsEnabled: Bool {
         !arguments.contains("-openreshotNoMemoryLog")
     }
@@ -314,8 +241,6 @@ enum OpenReshotDebugFlags {
             noOutputBackings ? "-openreshotNoOutputBackings" : nil,
             useOutputBackings ? "-openreshotUseOutputBackings" : nil,
             frequentReshape ? "-openreshotFrequentReshape" : nil,
-            preferBundledModel ? "-openreshotPreferBundledModel" : nil,
-            preferDownloadedModel ? "-openreshotPreferDownloadedModel" : nil,
             memoryLogsEnabled ? nil : "-openreshotNoMemoryLog"
         ].compactMap { $0 }
         guard !activeFlags.isEmpty else { return }
@@ -645,22 +570,11 @@ private struct OpenReshotMemoryAutoTestCase {
     var title: String { "\(modelSelection.title) \(profile.title)" }
 
     static func defaultCases(for modelSelection: OpenReshotModelSelection) -> [OpenReshotMemoryAutoTestCase] {
-        if modelSelection.usesQuantizedWeights {
-            return []
-        }
         switch modelSelection {
         case .automatic:
-            return [
-                .init(modelSelection: .bundled1536, profile: .cpuNoBackings),
-                .init(modelSelection: .bundled1280, profile: .cpuNoBackings),
-                .init(modelSelection: .bundled1024, profile: .cpuNoBackings),
-                .init(modelSelection: .bundled896, profile: .cpuNoBackings),
-                .init(modelSelection: .bundled768, profile: .cpuNoBackings)
-            ]
-        case .bundled1536, .bundled1280, .bundled1024, .bundled896, .bundled768, .downloaded:
+            return [.init(modelSelection: .downloaded, profile: .cpuNoBackings)]
+        case .downloaded:
             return [.init(modelSelection: modelSelection, profile: .cpuNoBackings)]
-        case .bundledInt4, .bundledPalettize4:
-            return []
         }
     }
 
@@ -705,6 +619,7 @@ struct ReshotCacheItem: Codable, Identifiable, Equatable {
 }
 
 private enum ReshotCacheStore {
+    private static let currentFormatVersion = 2
     private static let bundledDemoID = "openreshot-bundled-demo"
     private static let bundledDemoResource = "DemoFLOW"
     private static let folderName = "ReshotCache"
@@ -766,6 +681,14 @@ private enum ReshotCacheStore {
         return cacheDirectory(for: item)?.appendingPathComponent(item.thumbnailImageName)
     }
 
+    static func sourceImage(for item: ReshotCacheItem) -> UIImage? {
+        cachedImage(at: sourceURL(for: item), for: item)
+    }
+
+    static func thumbnailImage(for item: ReshotCacheItem) -> UIImage? {
+        cachedImage(at: thumbnailURL(for: item), for: item)
+    }
+
     static func splatURL(for item: ReshotCacheItem) -> URL? {
         if isBundledItem(item) {
             return Bundle.main.url(forResource: bundledDemoResource, withExtension: "ply")
@@ -802,7 +725,7 @@ private enum ReshotCacheStore {
             let splatFileName = "scene.ply"
             let item = ReshotCacheItem(
                 id: id,
-                formatVersion: 1,
+                formatVersion: currentFormatVersion,
                 createdAt: Date(),
                 sourceSignature: sourceSignature,
                 modelSelection: modelSelection.rawValue,
@@ -863,6 +786,16 @@ private enum ReshotCacheStore {
         try? rootDirectory(create: false).appendingPathComponent(item.id, isDirectory: true)
     }
 
+    private static func cachedImage(at url: URL?, for item: ReshotCacheItem) -> UIImage? {
+        guard let url, let image = UIImage(contentsOfFile: url.path) else { return nil }
+        guard needsLegacyVerticalFlip(item) else { return image }
+        return verticallyFlipped(image)
+    }
+
+    private static func needsLegacyVerticalFlip(_ item: ReshotCacheItem) -> Bool {
+        !isBundledItem(item) && item.formatVersion < currentFormatVersion
+    }
+
     private static var bundledDemoItem: ReshotCacheItem? {
         guard Bundle.main.url(forResource: bundledDemoResource, withExtension: "png") != nil,
               Bundle.main.url(forResource: bundledDemoResource, withExtension: "ply") != nil else {
@@ -900,41 +833,28 @@ private enum ReshotCacheStore {
     }
 
     private static func jpegData(from image: UIImage, compressionQuality: CGFloat) -> Data? {
-        let width = max(1, Int((image.size.width * image.scale).rounded()))
-        let height = max(1, Int((image.size.height * image.scale).rounded()))
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let bitmapInfo = CGImageAlphaInfo.noneSkipLast.rawValue
-        guard let context = CGContext(data: nil,
-                                      width: width,
-                                      height: height,
-                                      bitsPerComponent: 8,
-                                      bytesPerRow: 0,
-                                      space: colorSpace,
-                                      bitmapInfo: bitmapInfo) else {
-            return image.jpegData(compressionQuality: compressionQuality)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = image.scale
+        format.opaque = true
+        let normalized = UIGraphicsImageRenderer(size: image.size, format: format).image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: image.size))
+            image.draw(in: CGRect(origin: .zero, size: image.size))
         }
-        context.interpolationQuality = .high
-        context.setFillColor(UIColor.white.cgColor)
-        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
-        UIGraphicsPushContext(context)
-        image.draw(in: CGRect(x: 0, y: 0, width: width, height: height))
-        UIGraphicsPopContext()
+        return normalized.jpegData(compressionQuality: compressionQuality)
+    }
 
-        guard let cgImage = context.makeImage() else {
-            return image.jpegData(compressionQuality: compressionQuality)
+    private static func verticallyFlipped(_ image: UIImage) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = image.scale
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: image.size, format: format).image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: image.size))
+            context.cgContext.translateBy(x: 0, y: image.size.height)
+            context.cgContext.scaleBy(x: 1, y: -1)
+            image.draw(in: CGRect(origin: .zero, size: image.size))
         }
-        let data = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(data, UTType.jpeg.identifier as CFString, 1, nil) else {
-            return nil
-        }
-        let options: [CFString: Any] = [
-            kCGImageDestinationLossyCompressionQuality: compressionQuality
-        ]
-        CGImageDestinationAddImage(destination, cgImage, options as CFDictionary)
-        guard CGImageDestinationFinalize(destination) else {
-            return nil
-        }
-        return data as Data
     }
 }
 
@@ -966,7 +886,7 @@ final class AppState: ObservableObject {
     @Published var subjectProtectionMask: UIImage?
     @Published var geminiKey: String
     @Published var hasExportablePreview = false
-    @Published var memoryAutoTestEnabled: Bool = UserDefaults.standard.bool(forKey: "OpenReshot.memoryAutoTestEnabled") {
+    @Published var memoryAutoTestEnabled = false {
         didSet {
             guard oldValue != memoryAutoTestEnabled else { return }
             UserDefaults.standard.set(memoryAutoTestEnabled, forKey: Self.memoryAutoTestEnabledKey)
@@ -975,7 +895,7 @@ final class AppState: ObservableObject {
     }
     @Published var memoryAutoTestRunning = false
     @Published var memoryAutoTestStatus = ""
-    @Published var memoryTestProfile: OpenReshotMemoryTestProfile = .saved {
+    @Published var memoryTestProfile: OpenReshotMemoryTestProfile = .normal {
         didSet {
             guard oldValue != memoryTestProfile else { return }
             OpenReshotMemoryTestProfile.saved = memoryTestProfile
@@ -1053,6 +973,8 @@ final class AppState: ObservableObject {
     """
 
     init() {
+        UserDefaults.standard.set(false, forKey: Self.memoryAutoTestEnabledKey)
+        OpenReshotMemoryTestProfile.saved = .normal
         OpenReshotDebugFlags.logActiveFlags()
         OpenReshotDiagnostics.logRuntimeEnvironment()
         OpenReshotMemoryProbe.log("app state init")
@@ -1186,20 +1108,6 @@ final class AppState: ObservableObject {
 
     func resolvedModelSelection(_ selection: OpenReshotModelSelection) -> OpenReshotModelSelection {
         guard selection == .automatic else { return selection }
-        if OpenReshotDebugFlags.preferDownloadedModel,
-           modelStore.activeModelURL(selection: .downloaded) != nil {
-            return .downloaded
-        }
-        let bundledFallbacks: [OpenReshotModelSelection] = [
-            .bundled1536,
-            .bundled1280,
-            .bundled1024,
-            .bundled896,
-            .bundled768
-        ]
-        if let bundled = bundledFallbacks.first(where: { modelStore.activeModelURL(selection: $0) != nil }) {
-            return bundled
-        }
         if modelStore.activeModelURL(selection: .downloaded) != nil {
             return .downloaded
         }
@@ -1977,7 +1885,7 @@ final class AppState: ObservableObject {
     ) {
         OpenReshotMemoryProbe.log("load cached reshot start")
         guard let sourceURL = ReshotCacheStore.sourceURL(for: item),
-              let sourceImage = sourceOverride ?? UIImage(contentsOfFile: sourceURL.path) else {
+              let sourceImage = sourceOverride ?? ReshotCacheStore.sourceImage(for: item) else {
             processFailed = true
             processFailureKind = .imageLoad
             print("❌ [OpenReshot] cached source missing for \(item.id)")
@@ -5515,8 +5423,7 @@ private struct ReshotGalleryView: View {
     private func galleryCard(_ item: ReshotCacheItem) -> some View {
         VStack(alignment: .leading, spacing: 9) {
             ZStack {
-                if let url = ReshotCacheStore.thumbnailURL(for: item),
-                   let image = UIImage(contentsOfFile: url.path) {
+                if let image = ReshotCacheStore.thumbnailImage(for: item) {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFill()
@@ -5631,8 +5538,6 @@ struct SettingsView: View {
                                 .padding(.bottom, 34)
 
                             modelSection
-                            memoryTestSection
-                                .padding(.top, 34)
                             qualitySection
                                 .padding(.top, 34)
                             if shouldShowPreviewExportSection {
@@ -5817,9 +5722,6 @@ struct SettingsView: View {
                 modelStatusCapsule(title: "已下载", systemImage: "checkmark")
             }
 
-        case .bundled:
-            modelStatusCapsule(title: "内置", systemImage: "shippingbox")
-
         case .checkingSource:
             modelStatusCapsule(title: "连接中", systemImage: "arrow.down.circle")
 
@@ -5866,150 +5768,6 @@ struct SettingsView: View {
                     .strokeBorder(modelStatusForeground.opacity(0.22), lineWidth: 1)
             )
             .contentShape(Capsule())
-    }
-
-    private var memoryTestSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            sectionLabel("内存测试")
-
-            settingsCard {
-                VStack(spacing: 0) {
-                    Toggle(isOn: $app.memoryAutoTestEnabled) {
-                        settingsToggleLabel(title: "自动轮测",
-                                            caption: memoryAutoTestCaption,
-                                            systemImage: "speedometer")
-                    }
-                    .toggleStyle(.switch)
-                    .tint(SettingsSheetStyle.accent)
-                    .padding(.horizontal, 18)
-                    .frame(minHeight: 66)
-
-                    divider
-
-                    Menu {
-                        ForEach(OpenReshotMemoryTestProfile.allCases) { profile in
-                            Button {
-                                app.memoryTestProfile = profile
-                            } label: {
-                                Label(profile.title, systemImage: app.memoryTestProfile == profile ? "checkmark" : profile.systemImage)
-                            }
-                        }
-                    } label: {
-                        settingsChoiceRow(title: "测试档位",
-                                          caption: app.memoryTestProfile.subtitle,
-                                          value: app.memoryTestProfile.title,
-                                          systemImage: app.memoryTestProfile.systemImage)
-                    }
-                    .buttonStyle(.plain)
-
-                    divider
-
-                    Menu {
-                        ForEach(OpenReshotModelSelection.allCases) { selection in
-                            let available = app.modelSelectionIsAvailable(selection)
-                            Button {
-                                app.modelSelection = selection
-                            } label: {
-                                Label(available ? selection.title : "\(selection.title) · 未内置",
-                                      systemImage: app.modelSelection == selection ? "checkmark" : selection.systemImage)
-                            }
-                            .disabled(!available)
-                        }
-                    } label: {
-                        settingsChoiceRow(title: "模型包",
-                                          caption: modelSelectionCaption,
-                                          value: app.modelSelection.title,
-                                          systemImage: app.modelSelection.systemImage,
-                                          isWarning: !app.modelSelectionIsAvailable(app.modelSelection))
-                    }
-                    .buttonStyle(.plain)
-
-                }
-            }
-        }
-    }
-
-    private var modelSelectionCaption: String {
-        if app.modelSelectionIsAvailable(app.modelSelection) {
-            return app.modelSelection.subtitle
-        }
-        return "当前模型包未内置"
-    }
-
-    private var memoryAutoTestCaption: String {
-        if app.memoryAutoTestRunning {
-            return app.memoryAutoTestStatus.isEmpty ? "运行中" : app.memoryAutoTestStatus
-        }
-        if app.memoryAutoTestEnabled {
-            let caseNames = OpenReshotMemoryAutoTestCase.defaultCases(for: app.modelSelection).map(\.title).joined(separator: "、")
-            return "选图后自动跑 \(caseNames)"
-        }
-        if !app.memoryAutoTestStatus.isEmpty {
-            return app.memoryAutoTestStatus
-        }
-        return "关闭时选图直接重建预览"
-    }
-
-    private func settingsToggleLabel(title: String, caption: String, systemImage: String) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: systemImage)
-                .font(.system(size: 15, weight: .semibold))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(SettingsSheetStyle.accent.opacity(0.82))
-                .frame(width: 22)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title.localized)
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundStyle(SettingsSheetStyle.primaryText)
-
-                Text(caption.localized)
-                    .font(.system(size: 12, weight: .regular, design: .rounded))
-                    .foregroundStyle(SettingsSheetStyle.secondaryText)
-                    .lineLimit(2)
-            }
-        }
-    }
-
-    private func settingsChoiceRow(title: String,
-                                   caption: String,
-                                   value: String,
-                                   systemImage: String,
-                                   isWarning: Bool = false) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: systemImage)
-                .font(.system(size: 15, weight: .semibold))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(isWarning ? SettingsSheetStyle.destructiveText : SettingsSheetStyle.accent.opacity(0.82))
-                .frame(width: 22)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title.localized)
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundStyle(SettingsSheetStyle.primaryText)
-
-                Text(caption.localized)
-                    .font(.system(size: 12, weight: .regular, design: .rounded))
-                    .foregroundStyle(isWarning ? SettingsSheetStyle.destructiveText.opacity(0.88) : SettingsSheetStyle.secondaryText)
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 12)
-
-            HStack(spacing: 6) {
-                Text(value.localized)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(isWarning ? SettingsSheetStyle.destructiveText : SettingsSheetStyle.primaryText)
-                    .lineLimit(1)
-
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(SettingsSheetStyle.tertiaryText)
-            }
-        }
-        .padding(.horizontal, 18)
-        .frame(height: 62)
-        .contentShape(Rectangle())
     }
 
     private var qualitySection: some View {
@@ -6204,8 +5962,6 @@ struct SettingsView: View {
         switch modelStore.installState {
         case .downloaded:
             return "checkmark.circle"
-        case .bundled:
-            return "shippingbox"
         case .checkingSource, .downloading:
             return "arrow.down.circle"
         case .failed:
@@ -6267,8 +6023,6 @@ struct SettingsView: View {
         switch modelStore.installState {
         case .downloaded:
             return "本机模型已就绪".localized
-        case .bundled:
-            return "随 App 内置可用".localized
         case .checkingSource:
             return modelStore.hasResumeProgress
                 ? "正在准备继续下载".localized
@@ -6286,7 +6040,7 @@ struct SettingsView: View {
 
     private var modelStateColor: Color {
         switch modelStore.installState {
-        case .downloaded, .bundled:
+        case .downloaded:
             return SettingsSheetStyle.successText
         case .failed:
             return SettingsSheetStyle.destructiveText
@@ -6297,7 +6051,7 @@ struct SettingsView: View {
 
     private var modelStatusForeground: Color {
         switch modelStore.installState {
-        case .downloaded, .bundled:
+        case .downloaded:
             return modelStateColor
         case .failed:
             return SettingsSheetStyle.destructiveText
@@ -6308,7 +6062,7 @@ struct SettingsView: View {
 
     private var modelStatusBackground: Color {
         switch modelStore.installState {
-        case .downloaded, .bundled:
+        case .downloaded:
             return modelStateColor.opacity(0.12)
         case .failed:
             return SettingsSheetStyle.destructiveText.opacity(0.11)

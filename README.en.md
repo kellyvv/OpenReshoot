@@ -48,6 +48,14 @@ After WWDC 2026, spatial photos and angle-aware photo viewing became one of the 
 
 ## Latest Updates
 
+**2026-06-16**
+
+- A new Reshot TestFlight build has been uploaded: **1.0 (9)**.
+- The current deployment target is iOS 18.0, so iPhone XR / XS / SE 2 and newer can theoretically install the app, and low-memory phones can run the model.
+- For the best experience, iPhone 14 Pro and newer, all iPhone 15 / 16 / 17 models, and iPhone Air are still recommended.
+- Model inference and on-device Core ML compilation are memory-intensive, so lower-memory devices may run slower or get warmer.
+- To make the full pipeline work on lower-memory phones, this update broke down and tested model download, local Core ML compilation, inference, caching, and the TestFlight release path in detail.
+
 **2026-06-14**
 
 - The UI has been rebuilt around a more camera-like experience, with a new **Lens** control panel.
@@ -68,7 +76,7 @@ After WWDC 2026, spatial photos and angle-aware photo viewing became one of the 
 ### 2026-06-11
 
 - The iOS flow now covers picking a photo, viewing motion, reshooting the current angle, and saving the result.
-- The iOS app can use the lightweight download flow; if `ios/OpenReshot/SHARP.mlpackage` exists locally, XcodeGen bundles it into the app as the built-in model.
+- The iOS app uses an in-app SHARP model download flow on first use.
 - The viewer includes glow, sheen, cover fade, and colorful missing-area treatment.
 - The bottom controls now use a quieter PhoneClaw-style visual direction and blend directly into the background.
 - The model repository is public on [ModelScope](https://modelscope.cn/models/kilywei/openreshoot-sharp-coreml) and [Hugging Face](https://huggingface.co/kellyxiaowei/openreshoot-sharp-coreml), where the `SHARP.mlpackage` source files can be inspected directly.
@@ -93,7 +101,7 @@ xcodegen generate
 open OpenReshot.xcodeproj
 ```
 
-In Xcode, select the `OpenReshot` target, set your signing team, choose a real iOS device, and run. If `ios/OpenReshot/SHARP.mlpackage` exists locally, the build bundles it; otherwise the app bundle stays lightweight and downloads the model on first use.
+In Xcode, select the `OpenReshot` target, set your signing team, choose a real iOS device, and run. The build does not bundle the SHARP model, so the app stays lightweight and users download the model on first use.
 
 More iOS-specific details are in [ios/README.md](ios/README.md).
 
