@@ -83,9 +83,9 @@ else
 fi
 
 if [ -d "$ROOT/ios/OpenReshot/SHARP.mlpackage" ]; then
-  pass "iOS model package exists: ios/OpenReshot/SHARP.mlpackage"
+  warn "local iOS model package exists but is not included by project.yml: ios/OpenReshot/SHARP.mlpackage"
 else
-  warn "iOS model package missing; run scripts/prepare_ios_model.sh"
+  pass "iOS app target is model-empty; users download the model in app"
 fi
 
 if [ -d "$ROOT/ios/OpenReshot.xcodeproj" ]; then

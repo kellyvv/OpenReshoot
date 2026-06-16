@@ -85,10 +85,8 @@ final class SharpModel {
         let resolvedURL: URL
         if let modelURL {
             resolvedURL = modelURL
-        } else if let bundledURL = Bundle.main.url(forResource: "SHARP", withExtension: "mlmodelc") {
-            resolvedURL = bundledURL
         } else {
-            throw err("Reconstruction model not in bundle — add SHARP.mlpackage to the OpenReshot target.")
+            throw err("Reconstruction model is not installed. Download the model in Settings first.")
         }
         self.backend = backend
         let cfg = MLModelConfiguration()

@@ -7,7 +7,6 @@ enum ReconstructionModelInstallState: Equatable, Sendable {
     case checkingSource
     case downloading
     case downloaded
-    case bundled
     case failed(String)
 }
 
@@ -62,14 +61,12 @@ final class ReconstructionModelStore: ObservableObject {
         switch installState {
         case .downloaded:
             return "已下载".localized
-        case .bundled:
-            return "内置".localized
         case .downloading:
             return "下载中".localized
         case .checkingSource:
             return "连接中".localized
         case .failed:
-            return hasDownloadedModel ? "已下载".localized : (Self.bundledModelURL == nil ? "下载".localized : "内置".localized)
+            return hasDownloadedModel ? "已下载".localized : "下载".localized
         case .notInstalled:
             return "下载".localized
         }
@@ -110,12 +107,8 @@ final class ReconstructionModelStore: ObservableObject {
         downloadTask = Task { [weak self] in
             guard let store = self else { return }
             do {
-                if Self.builtInDownloadBaseURL != nil {
-                    try await Self.downloadAndInstallPackage { progress in
-                        await store.updateDownloadProgress(progress)
-                    }
-                } else {
-                    try Self.installBundledModel()
+                try await Self.downloadAndInstallPackage { progress in
+                    await store.updateDownloadProgress(progress)
                 }
                 store.finishInstall(onInstalled: onInstalled)
             } catch is CancellationError {
@@ -193,18 +186,10 @@ final class ReconstructionModelStore: ObservableObject {
     }
 
     nonisolated static func activeModelURL() -> URL? {
-        if !OpenReshotDebugFlags.preferDownloadedModel {
-            if let defaultBundledModelURL {
-                return defaultBundledModelURL
-            }
-            if let bundledModelURL {
-                return bundledModelURL
-            }
-        }
         if FileManager.default.fileExists(atPath: downloadedModelURL.path) {
             return downloadedModelURL
         }
-        return defaultBundledModelURL ?? bundledModelURL
+        return nil
     }
 
     nonisolated static func activeModelURL(selection: OpenReshotModelSelection) -> URL? {
@@ -213,41 +198,14 @@ final class ReconstructionModelStore: ObservableObject {
             return activeModelURL()
         case .downloaded:
             return FileManager.default.fileExists(atPath: downloadedModelURL.path) ? downloadedModelURL : nil
-        case .bundled1536, .bundled1280, .bundled1024, .bundled896, .bundled768, .bundledInt4, .bundledPalettize4:
-            guard let resourceName = selection.bundledResourceName else { return nil }
-            return bundledModelURL(resourceName: resourceName)
         }
     }
 
     nonisolated private static func currentInstallState() -> ReconstructionModelInstallState {
-        let bundledURL = defaultBundledModelURL ?? bundledModelURL
-        if bundledURL != nil, !OpenReshotDebugFlags.preferDownloadedModel {
-            return .bundled
-        }
         if FileManager.default.fileExists(atPath: downloadedModelURL.path) {
             return .downloaded
         }
-        if bundledURL != nil {
-            return .bundled
-        }
         return .notInstalled
-    }
-
-    nonisolated static var bundledModelURL: URL? {
-        bundledModelURL(resourceName: "SHARP")
-    }
-
-    nonisolated static var defaultBundledModelURL: URL? {
-        for resourceName in ["SHARP-sdpa-768", "SHARP-sdpa-896", "SHARP-sdpa-1024"] {
-            if let url = bundledModelURL(resourceName: resourceName) {
-                return url
-            }
-        }
-        return nil
-    }
-
-    nonisolated static func bundledModelURL(resourceName: String) -> URL? {
-        Bundle.main.url(forResource: resourceName, withExtension: "mlmodelc")
     }
 
     nonisolated static var downloadedModelURL: URL {
@@ -302,19 +260,6 @@ final class ReconstructionModelStore: ObservableObject {
     ]
 
     nonisolated private static let manifestStore = DownloadManifestStore(rootDirectory: modelsDirectory)
-
-    nonisolated private static func installBundledModel() throws {
-        guard let bundledModelURL else {
-            throw ReconstructionModelDownloadError.invalidURL
-        }
-        let fileManager = FileManager.default
-        try createDirectoryExcludedFromBackup(modelsDirectory)
-        let stagingURL = modelsDirectory.appendingPathComponent("SHARP.mlmodelc.installing-\(UUID().uuidString)", isDirectory: true)
-        try? fileManager.removeItem(at: stagingURL)
-        try fileManager.copyItem(at: bundledModelURL, to: stagingURL)
-        try? fileManager.removeItem(at: downloadedModelURL)
-        try fileManager.moveItem(at: stagingURL, to: downloadedModelURL)
-    }
 
     nonisolated private static func downloadAndInstallPackage(
         progress: @escaping @Sendable (ReconstructionDownloadProgress) async -> Void
